@@ -1,0 +1,73 @@
+{
+  "name": "git-idea",
+  "version": "0.1.0",
+  "description": "An IDEA-inspired cross-platform visual Git client",
+  "private": true,
+  "type": "module",
+  "main": "dist-electron/main.cjs",
+  "author": "Git IDEA",
+  "license": "MIT",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "vite --host 127.0.0.1",
+    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && vite build && node scripts/build-electron.mjs",
+    "start": "electron .",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "test:desktop": "node scripts/smoke.mjs",
+    "package": "npm run build && electron-builder",
+    "package:win": "npm run build && electron-builder --win portable",
+    "package:mac": "npm run build && electron-builder --mac dmg",
+    "package:linux": "npm run build && electron-builder --linux AppImage"
+  },
+  "build": {
+    "appId": "dev.gitidea.desktop",
+    "productName": "Git IDEA",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "artifactName": "Git-IDEA-${version}-${arch}.${ext}"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.developer-tools",
+      "identity": null
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Development"
+    }
+  },
+  "dependencies": {
+    "diff": "^9.0.0",
+    "lucide-react": "^1.58.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "electron": "^44.8.0",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4"
+  }
+}
