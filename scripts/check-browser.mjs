@@ -23,7 +23,15 @@ const launcher =
     : path.join(process.env.HOME, ".local/bin/tabbit-cli"));
 const result = spawnSync(
   launcher,
-  ["nodejs", "--task", "git-idea", "--request-id", `workflows-${Date.now()}`],
+  [
+    "nodejs",
+    "--task",
+    "git-idea",
+    "--request-id",
+    `workflows-${Date.now()}`,
+    "--timeout-ms",
+    "90000",
+  ],
   { input: program, encoding: "utf8", maxBuffer: 2 * 1024 * 1024 },
 );
 await mkdir(".test-output", { recursive: true });

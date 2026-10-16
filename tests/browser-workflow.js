@@ -147,6 +147,47 @@ await expect(
 ).toHaveValue("");
 await expect(list.getByRole("option")).toHaveCount(9);
 
+await page
+  .getByRole("combobox", { name: "筛选分支", exact: true })
+  .selectOption("refs/heads/test/ui-workflow");
+await expect(list.getByRole("option")).toHaveCount(9);
+await page
+  .getByRole("button", { name: "分支操作 test/ui-workflow", exact: true })
+  .click();
+await page
+  .getByRole("dialog")
+  .getByRole("button", { name: "重命名…", exact: true })
+  .click();
+await page
+  .getByRole("textbox", { name: "新名称", exact: true })
+  .fill("test/ui-renamed");
+await page
+  .getByRole("dialog")
+  .getByRole("button", { name: "重命名", exact: true })
+  .click();
+await expect(
+  page.getByRole("combobox", { name: "筛选分支", exact: true }),
+).toHaveValue("refs/heads/test/ui-renamed");
+await expect(list.getByRole("option")).toHaveCount(9);
+await page
+  .getByRole("button", { name: "分支操作 test/ui-renamed", exact: true })
+  .click();
+await page
+  .getByRole("dialog")
+  .getByRole("button", { name: "删除分支", exact: true })
+  .click();
+await page
+  .getByRole("dialog")
+  .getByRole("button", { name: "确认", exact: true })
+  .click();
+await expect(
+  page.getByRole("button", { name: "分支操作 test/ui-renamed", exact: true }),
+).toHaveCount(0);
+await expect(
+  page.getByRole("combobox", { name: "筛选分支", exact: true }),
+).toHaveValue("");
+await expect(list.getByRole("option")).toHaveCount(9);
+
 await page.getByRole("button", { name: "管理远程仓库", exact: true }).click();
 await page.getByRole("button", { name: "添加远程…", exact: true }).click();
 await page
@@ -220,6 +261,8 @@ return {
     "unsaved draft guard",
     "branch and tag name collision",
     "selected tag deletion clears its filter",
+    "selected branch rename follows its reference",
+    "selected branch deletion clears its filter",
   ],
   errors,
   fixture: fixture.repo,

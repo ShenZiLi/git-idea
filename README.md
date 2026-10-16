@@ -2,6 +2,8 @@
 
 跨平台可视化 Git 桌面工具，按 IntelliJ IDEA 的布局组织本地仓库工作流。使用 Electron、React、TypeScript 和系统 Git。
 
+当前阶段先交付 Windows 端，提供可直接启动的便携 EXE。macOS/Linux 保留构建入口，原生适配与验收放在后续阶段。
+
 ## 运行
 
 需要 Node.js 24+ 和 Git 2.28+，确保 `git` 位于系统 PATH。
@@ -68,7 +70,7 @@ npm run build           # TypeScript 检查、界面和 Electron 构建
 npm run test:desktop    # 生产窗口、沙箱、IPC 与本地 Git 验证
 ```
 
-安装了 Tabbit Browser 的本机环境可先启动 `npm run dev:web`，再运行 `npm run test:browser`，在真实临时仓库中验收 18 项界面流程。其他环境可按下列手动流程验收。
+安装了 Tabbit Browser 的本机环境可先启动 `npm run dev:web`，再运行 `npm run test:browser`，在真实临时仓库中验收 20 项界面流程。其他环境可按下列手动流程验收。
 
 测试在系统临时目录内创建仓库和本地裸远程，覆盖空仓库、中文/特殊路径、索引和工作区差异、初次提交、修订、重命名、分支/标签、拣选/还原、合并冲突、储藏、克隆与推拉、二进制和大小限制、路径隔离。不会使用任何真实远程账号。
 
