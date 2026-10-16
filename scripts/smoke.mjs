@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import electron from "electron";
@@ -35,8 +35,26 @@ child.on("error", (error) => {
 });
 child.on("close", async (code) => {
   clearTimeout(timeout);
-  if (code !== 0 || !output.includes("SMOKE_RESULT=")) process.exitCode = 1;
-  else
+  // Windows portable launchers forward the child exit code but may detach stdout.
+  // The fresh preferences receipt is written by the renderer's real open-repo IPC.
+  let rendererReceipt = false;
+  if (process.env.GIT_IDEA_SMOKE_EXECUTABLE && code === 0) {
+    try {
+      const receipt = JSON.parse(
+        await readFile(environment.GIT_IDEA_PREFERENCES, "utf8"),
+      );
+      rendererReceipt =
+        path.resolve(receipt.lastRepo) === path.resolve(process.cwd());
+    } catch {
+      /* A failed renderer must not pass without its receipt. */
+    }
+  }
+  if (code !== 0 || (!output.includes("SMOKE_RESULT=") && !rendererReceipt)) {
+    process.exitCode = 1;
+    console.error(
+      `Desktop verification failed: exit=${code}, rendererReceipt=${rendererReceipt}`,
+    );
+  } else
     console.log("Desktop production renderer, sandbox and Git IPC verified.");
   await rm(preferences, { recursive: true, force: true });
 });
