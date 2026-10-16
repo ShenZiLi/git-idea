@@ -68,6 +68,7 @@ npm run package:linux   # Linux AppImage，在 Linux 上构建
 npm test                # 临时真实 Git 仓库和视图模型测试
 npm run build           # TypeScript 检查、界面和 Electron 构建
 npm run test:desktop    # 生产窗口、沙箱、IPC 与本地 Git 验证
+npm run test:package    # Windows 打包资源与当前生产构建逐文件核对
 ```
 
 安装了 Tabbit Browser 的本机环境可先启动 `npm run dev:web`，再运行 `npm run test:browser`，在真实临时仓库中验收 20 项界面流程。其他环境可按下列手动流程验收。

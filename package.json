@@ -15,6 +15,7 @@
     "start": "node scripts/start.mjs",
     "test": "node --import tsx --test tests/*.test.ts",
     "test:desktop": "node scripts/smoke.mjs",
+    "test:package": "node scripts/check-package.mjs",
     "test:browser": "node scripts/check-browser.mjs",
     "format": "prettier --write src electron shared scripts tests vite.config.ts",
     "package": "npm run build && electron-builder",
@@ -64,6 +65,7 @@
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
+    "@electron/asar": "^3.4.1",
     "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
