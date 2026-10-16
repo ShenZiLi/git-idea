@@ -68,6 +68,8 @@ npm run build           # TypeScript 检查、界面和 Electron 构建
 npm run test:desktop    # 生产窗口、沙箱、IPC 与本地 Git 验证
 ```
 
+安装了 Tabbit Browser 的本机环境可先启动 `npm run dev:web`，再运行 `npm run test:browser`，在真实临时仓库中验收 16 项界面流程。其他环境可按下列手动流程验收。
+
 测试在系统临时目录内创建仓库和本地裸远程，覆盖空仓库、中文/特殊路径、索引和工作区差异、初次提交、修订、重命名、分支/标签、拣选/还原、合并冲突、储藏、克隆与推拉、二进制和大小限制、路径隔离。不会使用任何真实远程账号。
 
 `node scripts/create-playground.mjs` 可创建用于界面验收的真实临时仓库；路径写入忽略目录 `.test-output/playground.json`。其中包含分支、合并、标签、本地裸远程和待提交文件，便于手动走完整流程。

@@ -208,6 +208,17 @@ test("binary files, file size limits, literal pathspecs and traversal guards", a
     assert.equal(s.changes.find((c) => c.path === "l.txt")?.index, "?");
     await assert.rejects(readFile(f.repo, "../outside.txt"));
     await assert.rejects(readFile(f.repo, ".git/config"));
+    await assert.rejects(readFile(f.repo, ".GIT/config"));
+    try {
+      await fs.symlink(
+        path.join(f.repo, ".git/config"),
+        path.join(f.repo, "private-link.txt"),
+        "file",
+      );
+      await assert.rejects(readFile(f.repo, "private-link.txt"));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EPERM") throw error;
+    }
     await assert.rejects(
       mutate(f.repo, "stage", { paths: ["../outside.txt"] }),
     );
@@ -345,5 +356,40 @@ test("snapshot reads do not evict user operations from the command console", asy
     );
   } finally {
     await f.clean();
+  }
+});
+
+test("API initializes, opens and remembers an empty repository and validates preferences", async () => {
+  const base = await fs.mkdtemp(path.join(os.tmpdir(), "git-idea-api-"));
+  try {
+    const api = createApi({ preferencesPath: path.join(base, "prefs.json") });
+    const root = (await api({
+      method: "init",
+      params: { path: path.join(base, "new repo") },
+    })) as string;
+    const state = (await api({ method: "snapshot", repo: root })) as Awaited<
+      ReturnType<typeof snapshot>
+    >;
+    assert.equal(state.branch, "main");
+    assert.equal(state.head, null);
+    assert.equal(state.commits.length, 0);
+    assert.equal(await api({ method: "open", params: { path: root } }), root);
+    await api({
+      method: "preferences",
+      params: { theme: "light", fontSize: 100 },
+    });
+    const boot = (await createApi({
+      preferencesPath: path.join(base, "prefs.json"),
+    })({ method: "bootstrap" })) as {
+      preferences: { recent: string[]; fontSize: number };
+    };
+    assert.deepEqual(boot.preferences.recent, [root]);
+    assert.equal(boot.preferences.fontSize, 18);
+    await assert.rejects(api({ method: "init", params: {} }));
+    await assert.rejects(
+      api({ method: "mutate", repo: root, params: { action: "unknown" } }),
+    );
+  } finally {
+    await fs.rm(base, { recursive: true, force: true });
   }
 });

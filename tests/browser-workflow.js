@@ -143,7 +143,10 @@ await page
   .click();
 await expect(page.getByRole("dialog")).toHaveCount(0);
 
-await page.getByRole("button", { name: "notes.md U", exact: true }).click();
+await page
+  .locator(".commit-panel")
+  .getByRole("button", { name: "notes.md U", exact: true })
+  .click();
 await page.getByRole("button", { name: "编辑工作区文件", exact: true }).click();
 await page
   .getByRole("textbox", { name: "文件内容", exact: true })

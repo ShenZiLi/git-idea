@@ -169,7 +169,7 @@ export function relativeFile(repo: string, file: string): string {
     relative === ".." ||
     relative.startsWith(`..${path.sep}`) ||
     path.isAbsolute(relative) ||
-    relative.split(path.sep).includes(".git")
+    relative.split(path.sep).some((segment) => segment.toLowerCase() === ".git")
   )
     throw new Error("文件必须位于仓库目录内");
   return relative.split(path.sep).join("/");
@@ -185,6 +185,8 @@ async function safeDiskPath(repo: string, file: string) {
     path.isAbsolute(check)
   )
     throw new Error("不读取仓库外部的符号链接");
+  if (check.split(path.sep).some((segment) => segment.toLowerCase() === ".git"))
+    throw new Error("不读取 Git 内部元数据");
   return diskPath;
 }
 async function exists(file: string) {
