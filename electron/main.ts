@@ -37,6 +37,10 @@ app.whenReady().then(async () => {
     });
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     window.webContents.on('will-navigate', (event, url) => { if (url !== (devURL || `${appURL}/`)) event.preventDefault(); });
+    window.webContents.on('will-prevent-unload', event => {
+      const choice = dialog.showMessageBoxSync(window!, { type: 'question', buttons: ['继续编辑', '放弃编辑并关闭'], defaultId: 0, cancelId: 0, title: '未保存的编辑', message: '当前文件还有未保存的编辑。' });
+      if (choice === 1) event.preventDefault();
+    });
     window.on('closed', () => { window = null; });
     if (devURL) await window.loadURL(devURL); else await window.loadURL(`${appURL}/`);
     if (process.env.GIT_IDEA_SMOKE) {
