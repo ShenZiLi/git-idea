@@ -12,9 +12,11 @@
     "dev:web": "vite --host 127.0.0.1",
     "typecheck": "tsc --noEmit",
     "build": "npm run typecheck && vite build && node scripts/build-electron.mjs",
-    "start": "electron .",
+    "start": "node scripts/start.mjs",
     "test": "node --import tsx --test tests/*.test.ts",
     "test:desktop": "node scripts/smoke.mjs",
+    "test:browser": "node scripts/check-browser.mjs",
+    "format": "prettier --write src electron shared scripts tests vite.config.ts",
     "package": "npm run build && electron-builder",
     "package:win": "npm run build && electron-builder --win portable",
     "package:mac": "npm run build && electron-builder --mac dmg",
@@ -32,7 +34,9 @@
       "package.json"
     ],
     "asar": true,
+    "icon": "public/icon.png",
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         "portable"
       ],
@@ -67,6 +71,7 @@
     "electron": "^44.8.0",
     "electron-builder": "^26.15.3",
     "esbuild": "^0.28.2",
+    "prettier": "^3.9.10",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "^8.3.4"

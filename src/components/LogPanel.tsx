@@ -1,52 +1,585 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Archive, ArrowDownToLine, ArrowUpFromLine, Check, ChevronDown, Copy, ExternalLink, Filter, GitCommitHorizontal, GitPullRequestArrow, Hash, Maximize2, MoreHorizontal, RefreshCw, Search, Tag, Terminal, Trash2, UserRound, X } from 'lucide-react';
-import type { CommandLog, Commit, CommitDetail, RepoSnapshot, Stash } from '../../shared/types';
-import { graphRows } from '../graph';
-import { request } from '../api';
-import { BranchLabel, dateTime, Empty, FileIcon, IconButton, Spinner } from './ui';
+import { useEffect, useMemo, useState } from "react";
+import {
+  Archive,
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  Check,
+  ChevronDown,
+  Copy,
+  ExternalLink,
+  Filter,
+  GitCommitHorizontal,
+  GitPullRequestArrow,
+  Hash,
+  Maximize2,
+  MoreHorizontal,
+  RefreshCw,
+  Search,
+  Tag,
+  Terminal,
+  Trash2,
+  UserRound,
+  X,
+} from "lucide-react";
+import type {
+  CommandLog,
+  Commit,
+  CommitDetail,
+  RepoSnapshot,
+  Stash,
+} from "../../shared/types";
+import { graphRows } from "../graph";
+import { request } from "../api";
+import {
+  BranchLabel,
+  dateTime,
+  Empty,
+  FileIcon,
+  IconButton,
+  Spinner,
+} from "./ui";
 
-export interface LogFilters { search: string; ref: string; author: string; since: string; file: string; limit: number }
-export function CommitDetails({ repo, hash, detail, setDetail, openDiff, action, notify }: {
-  repo: string; hash: string; detail: CommitDetail | null; setDetail: (v: CommitDetail | null) => void; openDiff: (path: string, hash: string, oldPath?: string) => void;
-  action: (name: string, commit: Commit) => void; notify: (message: string, error?: boolean) => void;
-}) {
-  const [loading, setLoading] = useState(false), [error, setError] = useState(''), [menu, setMenu] = useState(false);
-  useEffect(() => { if (!repo || !hash) { setDetail(null); return; } let current = true; setLoading(true); setError(''); request<CommitDetail>('commitDetail', repo, { hash }).then(v => current && setDetail(v)).catch(e => current && setError(e.message)).finally(() => current && setLoading(false)); return () => { current = false; }; }, [repo, hash]);
-  if (!hash) return <aside className="details-panel"><Empty icon={<GitCommitHorizontal size={26} />} title="选择一条提交"><span>查看文件更改和提交详情</span></Empty></aside>;
-  return <aside className="details-panel"><div className="panel-toolbar"><span className="tiny muted">提交详情</span><span className="spacer" /><IconButton title="复制提交哈希" onClick={() => { navigator.clipboard.writeText(hash).then(() => notify('已复制提交哈希')).catch(() => notify('复制失败', true)); }}><Copy size={13} /></IconButton><div className="popover-anchor"><IconButton title="更多提交操作" onClick={() => setMenu(!menu)}><MoreHorizontal size={16} /></IconButton>{menu && <><button className="popover-dismiss" aria-label="关闭提交菜单" onClick={() => setMenu(false)} /><div className="menu popover commit-menu">{[['cherry-pick', '拣选此提交'], ['revert', '还原此提交'], ['reset', '重置到此提交…'], ['tag', '创建标签…']].map(([name, label]) => <button key={name} onClick={() => { if (detail) action(name, detail.commit); setMenu(false); }}>{label}</button>)}</div></>}</div></div>
-    {loading ? <div className="inline-loading"><Spinner />读取提交…</div> : error ? <div className="inline-warning">{error}</div> : detail && <>
-      <div className="detail-files"><div className="detail-repo"><ChevronDown size={12} /><span className="repo-square">G</span><strong>{repo.split(/[/\\]/).at(-1)}</strong><span className="tiny muted">{detail.files.length} 个文件</span></div>{detail.files.map(file => <button key={file.path} title={file.path} className="detail-file" onClick={() => openDiff(file.path, hash, file.oldPath)}><FileIcon name={file.path} /><span className={`truncate ${file.status === 'A' ? 'green' : file.status === 'D' ? 'red' : 'modified'}`}>{file.path}</span><span className="diff-stat"><span className="green">+{file.additions}</span><span className="red">−{file.deletions}</span></span></button>)}{!detail.files.length && <div className="group-empty">此提交与首个父提交之间没有文件改动</div>}</div>
-      <div className="commit-description"><h3>{detail.commit.subject}</h3>{detail.commit.body && <pre>{detail.commit.body}</pre>}<div className="commit-author"><span className="avatar">{detail.commit.author.slice(0, 1).toUpperCase()}</span><div><strong>{detail.commit.author}</strong><span className="muted">{detail.commit.email}</span></div></div><div className="commit-meta"><Hash size={12} /><span className="mono">{hash.slice(0, 12)}</span></div><div className="commit-meta">{dateTime(detail.commit.date)}</div>{detail.commit.parents.length > 0 && <div className="tiny muted">父提交 · {detail.commit.parents.map(p => p.slice(0, 8)).join(', ')}</div>}{detail.commit.refs && <div className="detail-refs">{detail.commit.refs.split(', ').map(ref => <BranchLabel key={ref} name={ref.replace('HEAD -> ', '')} />)}</div>}</div>
-    </>}
-  </aside>;
+export interface LogFilters {
+  search: string;
+  ref: string;
+  author: string;
+  since: string;
+  file: string;
+  limit: number;
 }
-export function LogTable({ snapshot: s, selected, select, filters, setFilters, loading, refresh }: {
-  snapshot: RepoSnapshot | null; selected: string; select: (hash: string) => void; filters: LogFilters; setFilters: (f: LogFilters) => void; loading: boolean; refresh: () => void;
+export function CommitDetails({
+  repo,
+  hash,
+  detail,
+  setDetail,
+  openDiff,
+  action,
+  notify,
+}: {
+  repo: string;
+  hash: string;
+  detail: CommitDetail | null;
+  setDetail: (v: CommitDetail | null) => void;
+  openDiff: (path: string, hash: string, oldPath?: string) => void;
+  action: (name: string, commit: Commit) => void;
+  notify: (message: string, error?: boolean) => void;
+}) {
+  const [loading, setLoading] = useState(false),
+    [error, setError] = useState(""),
+    [menu, setMenu] = useState(false);
+  useEffect(() => {
+    if (!repo || !hash) {
+      setDetail(null);
+      return;
+    }
+    let current = true;
+    setLoading(true);
+    setError("");
+    request<CommitDetail>("commitDetail", repo, { hash })
+      .then((v) => current && setDetail(v))
+      .catch((e) => current && setError(e.message))
+      .finally(() => current && setLoading(false));
+    return () => {
+      current = false;
+    };
+  }, [repo, hash]);
+  if (!hash)
+    return (
+      <aside className="details-panel">
+        <Empty icon={<GitCommitHorizontal size={26} />} title="选择一条提交">
+          <span>查看文件更改和提交详情</span>
+        </Empty>
+      </aside>
+    );
+  return (
+    <aside className="details-panel">
+      <div className="panel-toolbar">
+        <span className="tiny muted">提交详情</span>
+        <span className="spacer" />
+        <IconButton
+          title="复制提交哈希"
+          onClick={() => {
+            navigator.clipboard
+              .writeText(hash)
+              .then(() => notify("已复制提交哈希"))
+              .catch(() => notify("复制失败", true));
+          }}
+        >
+          <Copy size={13} />
+        </IconButton>
+        <div className="popover-anchor">
+          <IconButton title="更多提交操作" onClick={() => setMenu(!menu)}>
+            <MoreHorizontal size={16} />
+          </IconButton>
+          {menu && (
+            <>
+              <button
+                className="popover-dismiss"
+                aria-label="关闭提交菜单"
+                onClick={() => setMenu(false)}
+              />
+              <div className="menu popover commit-menu">
+                {[
+                  ["cherry-pick", "拣选此提交"],
+                  ["revert", "还原此提交"],
+                  ["reset", "重置到此提交…"],
+                  ["tag", "创建标签…"],
+                ].map(([name, label]) => (
+                  <button
+                    key={name}
+                    onClick={() => {
+                      if (detail) action(name, detail.commit);
+                      setMenu(false);
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+      {loading ? (
+        <div className="inline-loading">
+          <Spinner />
+          读取提交…
+        </div>
+      ) : error ? (
+        <div className="inline-warning">{error}</div>
+      ) : (
+        detail && (
+          <>
+            <div className="detail-files">
+              <div className="detail-repo">
+                <ChevronDown size={12} />
+                <span className="repo-square">G</span>
+                <strong>{repo.split(/[/\\]/).at(-1)}</strong>
+                <span className="tiny muted">{detail.files.length} 个文件</span>
+              </div>
+              {detail.files.map((file) => (
+                <button
+                  key={file.path}
+                  title={file.path}
+                  className="detail-file"
+                  onClick={() => openDiff(file.path, hash, file.oldPath)}
+                >
+                  <FileIcon name={file.path} />
+                  <span
+                    className={`truncate ${file.status === "A" ? "green" : file.status === "D" ? "red" : "modified"}`}
+                  >
+                    {file.path}
+                  </span>
+                  <span className="diff-stat">
+                    <span className="green">+{file.additions}</span>
+                    <span className="red">−{file.deletions}</span>
+                  </span>
+                </button>
+              ))}
+              {!detail.files.length && (
+                <div className="group-empty">
+                  此提交与首个父提交之间没有文件改动
+                </div>
+              )}
+            </div>
+            <div className="commit-description">
+              <h3>{detail.commit.subject}</h3>
+              {detail.commit.body && <pre>{detail.commit.body}</pre>}
+              <div className="commit-author">
+                <span className="avatar">
+                  {detail.commit.author.slice(0, 1).toUpperCase()}
+                </span>
+                <div>
+                  <strong>{detail.commit.author}</strong>
+                  <span className="muted">{detail.commit.email}</span>
+                </div>
+              </div>
+              <div className="commit-meta">
+                <Hash size={12} />
+                <span className="mono">{hash.slice(0, 12)}</span>
+              </div>
+              <div className="commit-meta">{dateTime(detail.commit.date)}</div>
+              {detail.commit.parents.length > 0 && (
+                <div className="tiny muted">
+                  父提交 ·{" "}
+                  {detail.commit.parents.map((p) => p.slice(0, 8)).join(", ")}
+                </div>
+              )}
+              {detail.commit.refs && (
+                <div className="detail-refs">
+                  {detail.commit.refs.split(", ").map((ref) => (
+                    <BranchLabel key={ref} name={ref.replace("HEAD -> ", "")} />
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )
+      )}
+    </aside>
+  );
+}
+export function LogTable({
+  snapshot: s,
+  selected,
+  select,
+  filters,
+  setFilters,
+  loading,
+  refresh,
+}: {
+  snapshot: RepoSnapshot | null;
+  selected: string;
+  select: (hash: string) => void;
+  filters: LogFilters;
+  setFilters: (f: LogFilters) => void;
+  loading: boolean;
+  refresh: () => void;
 }) {
   const [advanced, setAdvanced] = useState(false);
   const commits = s?.commits || [];
   const graph = useMemo(() => graphRows(commits), [commits]);
-  const width = Math.min(Math.max(...graph.map(g => g.width), 1) * 15 + 15, 170);
-  return <section className="log-table-panel"><div className="log-toolbar"><div className="log-search"><Search size={14} /><input aria-label="搜索提交" placeholder="文本或哈希" value={filters.search} onChange={e => setFilters({ ...filters, search: e.target.value })} />{filters.search && <button title="清除搜索" onClick={() => setFilters({ ...filters, search: '' })}><X size={12} /></button>}</div>
-      <div className="filter-select"><GitPullRequestArrow size={13} /><select aria-label="筛选分支" value={filters.ref} onChange={e => setFilters({ ...filters, ref: e.target.value })}><option value="">所有分支</option><option value="HEAD">HEAD</option>{s?.branches.map(b => <option key={b.ref} value={b.name}>{b.name}</option>)}{s?.tags.map(t => <option key={`tag-${t.name}`} value={t.name}>{t.name}</option>)}</select></div>
-      <IconButton title="更多筛选" active={advanced} onClick={() => setAdvanced(!advanced)}><Filter size={14} /></IconButton><span className="spacer" /><span className="tiny muted">{commits.length} 条提交</span><IconButton title="刷新日志" disabled={loading} onClick={refresh}>{loading ? <Spinner /> : <RefreshCw size={14} />}</IconButton>
-    </div>
-    {advanced && <div className="advanced-filters"><label><UserRound size={12} /><input aria-label="筛选作者" placeholder="作者" value={filters.author} onChange={e => setFilters({ ...filters, author: e.target.value })} /></label><input aria-label="起始日期" type="date" value={filters.since} onChange={e => setFilters({ ...filters, since: e.target.value })} /><input aria-label="筛选文件路径" placeholder="文件路径" value={filters.file} onChange={e => setFilters({ ...filters, file: e.target.value })} /><button className="small" onClick={() => setFilters({ ...filters, author: '', since: '', file: '' })}>清除</button></div>}
-    <div className="log-columns"><span>提交</span><span>作者</span><span>日期</span><span>哈希</span></div>
-    <div className="log-scroll" role="listbox" aria-label="提交日志" tabIndex={0} onKeyDown={e => { if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const index = commits.findIndex(c => c.hash === selected); const next = commits[Math.max(0, Math.min(commits.length - 1, index + (e.key === 'ArrowDown' ? 1 : -1)))]; if (next) select(next.hash); } }}>
-      {commits.map((commit, i) => <div key={commit.hash} role="option" aria-selected={selected === commit.hash} className={`log-row ${selected === commit.hash ? 'selected' : ''}`} onClick={() => select(commit.hash)}>
-        <div className="commit-subject"><svg className="commit-graph" width={width} height="29" aria-hidden="true">{graph[i].lines.map((line, j) => { const x1 = line.from * 15 + 12, x2 = line.to * 15 + 12, y1 = line.start ? 14 : 0, y2 = line.end ? 14 : 29; return <path key={j} d={x1 === x2 ? `M${x1} ${y1}V${y2}` : `M${x1} ${y1} C${x1} 15 ${x2} 15 ${x2} ${y2}`} stroke={line.color} strokeWidth="1.6" fill="none" />; })}<circle cx={graph[i].lane * 15 + 12} cy="14" r={commit.refs.includes('HEAD') ? 4 : 3} fill={commit.refs.includes('HEAD') ? 'var(--surface)' : graph[i].color} stroke={graph[i].color} strokeWidth="1.8" /></svg><span className="truncate" title={commit.subject}>{commit.subject}</span>{commit.refs && <span className="log-refs">{commit.refs.split(', ').slice(0, 2).map(ref => <span key={ref} className={`ref-pill ${ref.includes('HEAD') ? 'head' : ''}`}><Tag size={10} />{ref.replace('HEAD -> ', '').replace('tag: ', '')}</span>)}</span>}</div><span className="log-author truncate" title={commit.email}>{commit.author}</span><span className="log-date">{dateTime(commit.date, true)}</span><span className="log-hash mono">{commit.hash.slice(0, 7)}</span>
-      </div>)}
-      {!commits.length && <Empty icon={<GitCommitHorizontal size={28} />} title={s?.changes.length ? '还没有匹配的提交' : '没有提交记录'}><span>{filters.search || filters.ref || filters.file ? '调整搜索条件后重试' : '在提交面板创建第一条提交'}</span></Empty>}
-      {s?.hasMore && <button className="load-more" disabled={loading} onClick={() => setFilters({ ...filters, limit: filters.limit + 300 })}>加载更多提交</button>}
-    </div>
-  </section>;
+  const width = Math.min(
+    Math.max(...graph.map((g) => g.width), 1) * 15 + 15,
+    170,
+  );
+  return (
+    <section className="log-table-panel">
+      <div className="log-toolbar">
+        <div className="log-search">
+          <Search size={14} />
+          <input
+            aria-label="搜索提交"
+            placeholder="文本或哈希"
+            value={filters.search}
+            onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+          />
+          {filters.search && (
+            <button
+              title="清除搜索"
+              onClick={() => setFilters({ ...filters, search: "" })}
+            >
+              <X size={12} />
+            </button>
+          )}
+        </div>
+        <div className="filter-select">
+          <GitPullRequestArrow size={13} />
+          <select
+            aria-label="筛选分支"
+            value={filters.ref}
+            onChange={(e) => setFilters({ ...filters, ref: e.target.value })}
+          >
+            <option value="">所有分支</option>
+            <option value="HEAD">HEAD</option>
+            {s?.branches.map((b) => (
+              <option key={b.ref} value={b.name}>
+                {b.name}
+              </option>
+            ))}
+            {s?.tags.map((t) => (
+              <option key={`tag-${t.name}`} value={t.name}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <IconButton
+          title="更多筛选"
+          active={advanced}
+          onClick={() => setAdvanced(!advanced)}
+        >
+          <Filter size={14} />
+        </IconButton>
+        <span className="spacer" />
+        <span className="tiny muted">{commits.length} 条提交</span>
+        <IconButton title="刷新日志" disabled={loading} onClick={refresh}>
+          {loading ? <Spinner /> : <RefreshCw size={14} />}
+        </IconButton>
+      </div>
+      {advanced && (
+        <div className="advanced-filters">
+          <label>
+            <UserRound size={12} />
+            <input
+              aria-label="筛选作者"
+              placeholder="作者"
+              value={filters.author}
+              onChange={(e) =>
+                setFilters({ ...filters, author: e.target.value })
+              }
+            />
+          </label>
+          <input
+            aria-label="起始日期"
+            type="date"
+            value={filters.since}
+            onChange={(e) => setFilters({ ...filters, since: e.target.value })}
+          />
+          <input
+            aria-label="筛选文件路径"
+            placeholder="文件路径"
+            value={filters.file}
+            onChange={(e) => setFilters({ ...filters, file: e.target.value })}
+          />
+          <button
+            className="small"
+            onClick={() =>
+              setFilters({ ...filters, author: "", since: "", file: "" })
+            }
+          >
+            清除
+          </button>
+        </div>
+      )}
+      <div className="log-columns">
+        <span>提交</span>
+        <span>作者</span>
+        <span>日期</span>
+        <span>哈希</span>
+      </div>
+      <div
+        className="log-scroll"
+        role="listbox"
+        aria-label="提交日志"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            e.preventDefault();
+            const index = commits.findIndex((c) => c.hash === selected);
+            const next =
+              commits[
+                Math.max(
+                  0,
+                  Math.min(
+                    commits.length - 1,
+                    index + (e.key === "ArrowDown" ? 1 : -1),
+                  ),
+                )
+              ];
+            if (next) select(next.hash);
+          }
+        }}
+      >
+        {commits.map((commit, i) => (
+          <div
+            key={commit.hash}
+            role="option"
+            aria-selected={selected === commit.hash}
+            className={`log-row ${selected === commit.hash ? "selected" : ""}`}
+            onClick={() => select(commit.hash)}
+          >
+            <div className="commit-subject">
+              <svg
+                className="commit-graph"
+                width={width}
+                height="29"
+                aria-hidden="true"
+              >
+                {graph[i].lines.map((line, j) => {
+                  const x1 = line.from * 15 + 12,
+                    x2 = line.to * 15 + 12,
+                    y1 = line.start ? 14 : 0,
+                    y2 = line.end ? 14 : 29;
+                  return (
+                    <path
+                      key={j}
+                      d={
+                        x1 === x2
+                          ? `M${x1} ${y1}V${y2}`
+                          : `M${x1} ${y1} C${x1} 15 ${x2} 15 ${x2} ${y2}`
+                      }
+                      stroke={line.color}
+                      strokeWidth="1.6"
+                      fill="none"
+                    />
+                  );
+                })}
+                <circle
+                  cx={graph[i].lane * 15 + 12}
+                  cy="14"
+                  r={commit.refs.includes("HEAD") ? 4 : 3}
+                  fill={
+                    commit.refs.includes("HEAD")
+                      ? "var(--surface)"
+                      : graph[i].color
+                  }
+                  stroke={graph[i].color}
+                  strokeWidth="1.8"
+                />
+              </svg>
+              <span className="truncate" title={commit.subject}>
+                {commit.subject}
+              </span>
+              {commit.refs && (
+                <span className="log-refs">
+                  {commit.refs
+                    .split(", ")
+                    .slice(0, 2)
+                    .map((ref) => (
+                      <span
+                        key={ref}
+                        className={`ref-pill ${ref.includes("HEAD") ? "head" : ""}`}
+                      >
+                        <Tag size={10} />
+                        {ref.replace("HEAD -> ", "").replace("tag: ", "")}
+                      </span>
+                    ))}
+                </span>
+              )}
+            </div>
+            <span className="log-author truncate" title={commit.email}>
+              {commit.author}
+            </span>
+            <span className="log-date">{dateTime(commit.date, true)}</span>
+            <span className="log-hash mono">{commit.hash.slice(0, 7)}</span>
+          </div>
+        ))}
+        {!commits.length && (
+          <Empty
+            icon={<GitCommitHorizontal size={28} />}
+            title={s?.changes.length ? "还没有匹配的提交" : "没有提交记录"}
+          >
+            <span>
+              {filters.search || filters.ref || filters.file
+                ? "调整搜索条件后重试"
+                : "在提交面板创建第一条提交"}
+            </span>
+          </Empty>
+        )}
+        {s?.hasMore && (
+          <button
+            className="load-more"
+            disabled={loading}
+            onClick={() =>
+              setFilters({ ...filters, limit: filters.limit + 300 })
+            }
+          >
+            加载更多提交
+          </button>
+        )}
+      </div>
+    </section>
+  );
 }
 export function ConsolePanel({ logs }: { logs: CommandLog[] }) {
   const [all, setAll] = useState(false);
-  const visible = logs.filter(log => all || !/git (status|rev-parse|symbolic-ref|for-each-ref|log |show |cat-file|diff |remote$|remote get-url|config --get|--version|stash list|hash-object)/.test(log.command));
-  return <section className="console-panel"><div className="panel-toolbar"><Terminal size={14} /><span>Git 命令执行记录</span><span className="spacer" /><label className="checkbox-label"><input type="checkbox" checked={all} onChange={e => setAll(e.target.checked)} />包含读取命令</label></div><div className="console-scroll">{visible.map(log => <details className={`console-entry ${!log.success ? 'error' : ''}`} key={log.id} open={!log.success}><summary><span className={log.success ? 'green' : 'red'}>{log.success ? '✓' : '×'}</span><time>{dateTime(log.date, true)}</time><code>{log.command}</code><span className="tiny muted">{log.duration} ms</span></summary><pre>{log.output || '执行成功'}</pre></details>)}{!visible.length && <Empty icon={<Terminal size={28} />} title="命令记录会显示在这里" />}</div></section>;
+  const visible = logs.filter(
+    (log) =>
+      all ||
+      !/git (status|rev-parse|symbolic-ref|for-each-ref|log |show |cat-file|diff |remote$|remote get-url|config --get|--version|stash list|hash-object)/.test(
+        log.command,
+      ),
+  );
+  return (
+    <section className="console-panel">
+      <div className="panel-toolbar">
+        <Terminal size={14} />
+        <span>Git 命令执行记录</span>
+        <span className="spacer" />
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={all}
+            onChange={(e) => setAll(e.target.checked)}
+          />
+          包含读取命令
+        </label>
+      </div>
+      <div className="console-scroll">
+        {visible.map((log) => (
+          <details
+            className={`console-entry ${!log.success ? "error" : ""}`}
+            key={log.id}
+            open={!log.success}
+          >
+            <summary>
+              <span className={log.success ? "green" : "red"}>
+                {log.success ? "✓" : "×"}
+              </span>
+              <time>{dateTime(log.date, true)}</time>
+              <code>{log.command}</code>
+              <span className="tiny muted">{log.duration} ms</span>
+            </summary>
+            <pre>{log.output || "执行成功"}</pre>
+          </details>
+        ))}
+        {!visible.length && (
+          <Empty icon={<Terminal size={28} />} title="命令记录会显示在这里" />
+        )}
+      </div>
+    </section>
+  );
 }
-export function StashPanel({ stashes, busy, mutate, confirm }: { stashes: Stash[]; busy: boolean; mutate: (action: string, p?: Record<string, unknown>) => Promise<boolean>; confirm: (title: string, message: string, action: () => Promise<unknown>) => void }) {
-  return <section className="stash-panel"><div className="panel-toolbar"><Archive size={14} /><strong>储藏</strong><span className="count">{stashes.length}</span><span className="spacer" /><span className="tiny muted">临时保存未完成的工作</span></div><div className="stash-scroll">{stashes.map(stash => <article className="stash-row" key={stash.ref}><Archive size={18} className="muted" /><div><strong>{stash.message}</strong><span className="tiny muted">{stash.ref} · {dateTime(stash.date)}</span></div><button disabled={busy} onClick={() => void mutate('stash.apply', { ref: stash.ref })}><ArrowDownToLine size={13} />应用</button><button disabled={busy} onClick={() => void mutate('stash.pop', { ref: stash.ref })}><ArrowUpFromLine size={13} />弹出</button><IconButton title={`删除 ${stash.ref}`} disabled={busy} onClick={() => confirm('删除储藏', `永久删除 ${stash.ref}：${stash.message}？`, () => mutate('stash.drop', { ref: stash.ref }))}><Trash2 size={14} /></IconButton></article>)}{!stashes.length && <Empty icon={<Archive size={30} />} title="没有储藏记录"><span>使用顶部的「储藏更改」保存当前工作</span></Empty>}</div></section>;
+export function StashPanel({
+  stashes,
+  busy,
+  mutate,
+  confirm,
+}: {
+  stashes: Stash[];
+  busy: boolean;
+  mutate: (action: string, p?: Record<string, unknown>) => Promise<boolean>;
+  confirm: (
+    title: string,
+    message: string,
+    action: () => Promise<unknown>,
+  ) => void;
+}) {
+  return (
+    <section className="stash-panel">
+      <div className="panel-toolbar">
+        <Archive size={14} />
+        <strong>储藏</strong>
+        <span className="count">{stashes.length}</span>
+        <span className="spacer" />
+        <span className="tiny muted">临时保存未完成的工作</span>
+      </div>
+      <div className="stash-scroll">
+        {stashes.map((stash) => (
+          <article className="stash-row" key={stash.ref}>
+            <Archive size={18} className="muted" />
+            <div>
+              <strong>{stash.message}</strong>
+              <span className="tiny muted">
+                {stash.ref} · {dateTime(stash.date)}
+              </span>
+            </div>
+            <button
+              disabled={busy}
+              onClick={() => void mutate("stash.apply", { ref: stash.ref })}
+            >
+              <ArrowDownToLine size={13} />
+              应用
+            </button>
+            <button
+              disabled={busy}
+              onClick={() => void mutate("stash.pop", { ref: stash.ref })}
+            >
+              <ArrowUpFromLine size={13} />
+              弹出
+            </button>
+            <IconButton
+              title={`删除 ${stash.ref}`}
+              disabled={busy}
+              onClick={() =>
+                confirm(
+                  "删除储藏",
+                  `永久删除 ${stash.ref}：${stash.message}？`,
+                  () => mutate("stash.drop", { ref: stash.ref }),
+                )
+              }
+            >
+              <Trash2 size={14} />
+            </IconButton>
+          </article>
+        ))}
+        {!stashes.length && (
+          <Empty icon={<Archive size={30} />} title="没有储藏记录">
+            <span>使用顶部的「储藏更改」保存当前工作</span>
+          </Empty>
+        )}
+      </div>
+    </section>
+  );
 }
