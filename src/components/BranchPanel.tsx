@@ -40,12 +40,12 @@ export function BranchPanel({
     name.toLowerCase().includes(search.toLowerCase());
   const row = (branch: Branch) => (
     <div
-      className={`branch-row ${filter === branch.name ? "selected" : ""} ${branch.current ? "current" : ""}`}
+      className={`branch-row ${filter === branch.ref ? "selected" : ""} ${branch.current ? "current" : ""}`}
       key={branch.ref}
     >
       <button
         title={`${branch.name}${branch.upstream ? ` → ${branch.upstream}` : ""}\n单击筛选日志，双击检出`}
-        onClick={() => onFilter(branch.name === filter ? "" : branch.name)}
+        onClick={() => onFilter(branch.ref === filter ? "" : branch.ref)}
         onDoubleClick={() => checkout(branch)}
       >
         {branch.current ? (
@@ -153,10 +153,16 @@ export function BranchPanel({
             .map((t) => (
               <div
                 key={t.name}
-                className={`branch-row ${filter === t.name ? "selected" : ""}`}
+                className={`branch-row ${filter === `refs/tags/${t.name}` ? "selected" : ""}`}
               >
                 <button
-                  onClick={() => onFilter(t.name === filter ? "" : t.name)}
+                  onClick={() =>
+                    onFilter(
+                      `refs/tags/${t.name}` === filter
+                        ? ""
+                        : `refs/tags/${t.name}`,
+                    )
+                  }
                 >
                   <Tag size={13} />
                   <span>{t.name}</span>

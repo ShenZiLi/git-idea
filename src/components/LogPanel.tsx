@@ -273,13 +273,13 @@ export function LogTable({
             <option value="">所有分支</option>
             <option value="HEAD">HEAD</option>
             {s?.branches.map((b) => (
-              <option key={b.ref} value={b.name}>
+              <option key={b.ref} value={b.ref}>
                 {b.name}
               </option>
             ))}
             {s?.tags.map((t) => (
-              <option key={`tag-${t.name}`} value={t.name}>
-                {t.name}
+              <option key={`tag-${t.name}`} value={`refs/tags/${t.name}`}>
+                标签: {t.name}
               </option>
             ))}
           </select>

@@ -123,8 +123,10 @@ export default function App() {
   const workbench = useRef<HTMLDivElement>(null),
     refreshSequence = useRef(0),
     repoRef = useRef(""),
+    filtersRef = useRef(filters),
     busyRef = useRef(false),
     toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  filtersRef.current = filters;
   const notify = useCallback((message: string, error = false) => {
     setToast({ message, error });
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -231,18 +233,41 @@ export default function App() {
       busyRef.current = true;
       setBusy(true);
       setStatus(`正在执行 ${action}…`);
+      let completed = false;
       try {
         const output = await request<string>("mutate", repoRef.current, {
           ...params,
           action,
         });
+        completed = true;
         notify(output.trim().slice(0, 500) || "操作成功");
         return true;
       } catch (e) {
         notify((e as Error).message, true);
         return false;
       } finally {
-        await refresh();
+        const current = filtersRef.current;
+        let next = current;
+        if (completed) {
+          const targetRef =
+            action === "tag.delete"
+              ? `refs/tags/${params.name}`
+              : `refs/heads/${params.name}`;
+          if (
+            ["branch.delete", "tag.delete", "branch.rename"].includes(action) &&
+            current.ref === targetRef
+          ) {
+            next = {
+              ...current,
+              ref:
+                action === "branch.rename"
+                  ? `refs/heads/${params.newName}`
+                  : "",
+            };
+            setFilters(next);
+          }
+        }
+        await refresh(repoRef.current, next);
         busyRef.current = false;
         setBusy(false);
       }
@@ -344,7 +369,8 @@ export default function App() {
         {
           key: "start",
           label: "起始提交或分支",
-          value: start || snapshot?.branch || "HEAD",
+          value: start || (snapshot?.head ? "HEAD" : ""),
+          required: false,
         },
       ],
       onSubmit: (values) => mutate("branch.create", values),
@@ -1007,7 +1033,9 @@ export default function App() {
                       {label}
                       {id === "log" && (
                         <span className="tiny muted">
-                          {filters.ref ? `: ${filters.ref}` : ": 所有分支"}
+                          {filters.ref
+                            ? `: ${filters.ref.replace(/^refs\/(heads|remotes|tags)\//, "")}`
+                            : ": 所有分支"}
                         </span>
                       )}
                       {id === "stash" && !!snapshot?.stashes.length && (
@@ -1257,7 +1285,7 @@ export default function App() {
             )}
             <button
               onClick={() => {
-                createBranch(branchManage.name);
+                createBranch(branchManage.ref);
                 setBranchManage(null);
               }}
             >
@@ -1273,7 +1301,7 @@ export default function App() {
                     confirm(
                       "合并分支",
                       `将 ${b.name} 合并到 ${snapshot?.branch}。`,
-                      () => mutate("merge", { ref: b.name }),
+                      () => mutate("merge", { ref: b.ref }),
                     );
                   }}
                 >
@@ -1287,7 +1315,7 @@ export default function App() {
                     confirm(
                       "变基当前分支",
                       `将 ${snapshot?.branch} 变基到 ${b.name}。这会重写当前分支上的提交。`,
-                      () => mutate("rebase", { ref: b.name }),
+                      () => mutate("rebase", { ref: b.ref }),
                     );
                   }}
                 >

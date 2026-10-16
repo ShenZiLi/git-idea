@@ -67,6 +67,7 @@ await fs.appendFile(
   "\n## 快捷键\n\nCtrl+K 提交，Ctrl+9 打开日志。\n",
 );
 commit("docs: add keyboard shortcut reference");
+run("tag", "dev", "refs/tags/v1.0.0");
 const remote = path.join(base, "remote.git");
 execFileSync("git", ["init", "--bare", "--initial-branch=main", remote], {
   encoding: "utf8",

@@ -17,6 +17,18 @@ await expect(
 ).toBeVisible();
 const list = page.getByRole("listbox", { name: "提交日志" });
 await expect(list.getByRole("option")).toHaveCount(8);
+await page
+  .getByRole("combobox", { name: "筛选分支", exact: true })
+  .selectOption("refs/tags/dev");
+await expect(list.getByRole("option")).toHaveCount(2);
+await page
+  .getByRole("combobox", { name: "筛选分支", exact: true })
+  .selectOption("refs/heads/dev");
+await expect(list.getByRole("option")).toHaveCount(8);
+await page
+  .getByRole("combobox", { name: "筛选分支", exact: true })
+  .selectOption("");
+await expect(list.getByRole("option")).toHaveCount(8);
 
 await page.getByRole("button", { name: "status.ts M", exact: true }).click();
 await expect(page.locator(".diff-row")).toHaveCount(9);
@@ -111,6 +123,16 @@ await expect(
   page.getByRole("button", { name: "删除标签 ui-verified", exact: true }),
 ).toBeVisible();
 await page
+  .getByRole("button", { name: "Git 日志（Ctrl 9）", exact: true })
+  .click();
+await page
+  .locator(".branches-panel")
+  .getByRole("button", { name: "ui-verified", exact: true })
+  .click();
+await expect(
+  page.getByRole("combobox", { name: "筛选分支", exact: true }),
+).toHaveValue("refs/tags/ui-verified");
+await page
   .getByRole("button", { name: "删除标签 ui-verified", exact: true })
   .click();
 await page
@@ -120,6 +142,10 @@ await page
 await expect(
   page.getByRole("button", { name: "删除标签 ui-verified", exact: true }),
 ).toHaveCount(0);
+await expect(
+  page.getByRole("combobox", { name: "筛选分支", exact: true }),
+).toHaveValue("");
+await expect(list.getByRole("option")).toHaveCount(9);
 
 await page.getByRole("button", { name: "管理远程仓库", exact: true }).click();
 await page.getByRole("button", { name: "添加远程…", exact: true }).click();
@@ -192,6 +218,8 @@ return {
     "add and remove remote",
     "file edit and save",
     "unsaved draft guard",
+    "branch and tag name collision",
+    "selected tag deletion clears its filter",
   ],
   errors,
   fixture: fixture.repo,

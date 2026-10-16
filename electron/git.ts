@@ -271,7 +271,16 @@ export async function history(
   repo: string,
   params: Record<string, unknown> = {},
 ): Promise<Commit[]> {
-  if (!(await hasHead(repo))) return [];
+  const headExists = await hasHead(repo);
+  if (!headExists) {
+    if (params.ref === "HEAD") return [];
+    const refs = await git(repo, [
+      "for-each-ref",
+      "--count=1",
+      "--format=%(refname)",
+    ]);
+    if (!refs.trim()) return [];
+  }
   const args = [
     "log",
     "--topo-order",
@@ -288,8 +297,14 @@ export async function history(
       /* A hexadecimal subject may not be an object name. */
     }
   }
-  if (params.ref) args.push(await resolveCommit(repo, String(params.ref)));
-  else args.push("--all", "HEAD");
+  if (params.ref) {
+    try {
+      args.push(await resolveCommit(repo, String(params.ref)));
+    } catch (error) {
+      if (/^refs\/(heads|remotes|tags)\//.test(String(params.ref))) return [];
+      throw error;
+    }
+  } else args.push("--all", ...(headExists ? ["HEAD"] : []));
   if (params.search)
     args.push(
       "--regexp-ignore-case",
@@ -320,18 +335,18 @@ export async function snapshot(
     headLog,
   ] = await Promise.all([
     git(repo, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]),
-    git(repo, ["symbolic-ref", "--short", "-q", "HEAD"]).catch(() =>
+    git(repo, ["symbolic-ref", "-q", "HEAD"]).catch(() =>
       git(repo, ["rev-parse", "--short", "HEAD"]),
     ),
     git(repo, [
       "for-each-ref",
-      "--format=%(refname)%00%(refname:short)%00%(HEAD)%00%(upstream:short)%00%(objectname)%00%(upstream:track)",
+      "--format=%(refname)%00%(HEAD)%00%(upstream)%00%(objectname)%00%(upstream:track)",
       "refs/heads",
       "refs/remotes",
     ]),
     git(repo, [
       "for-each-ref",
-      "--format=%(refname:short)%00%(objectname)",
+      "--format=%(refname)%00%(objectname)",
       "refs/tags",
     ]),
     git(repo, ["remote"]),
@@ -348,12 +363,12 @@ export async function snapshot(
     .split("\n")
     .filter(Boolean)
     .map((row) => {
-      const [ref, name, head, upstream, hash, track] = row.split("\0");
+      const [ref, head, upstream, hash, track] = row.split("\0");
       return {
-        name,
+        name: ref.replace(/^refs\/(heads|remotes)\//, ""),
         ref,
         current: head === "*",
-        upstream,
+        upstream: upstream.replace(/^refs\/(heads|remotes)\//, ""),
         hash,
         track,
         remote: ref.startsWith("refs/remotes/"),
@@ -390,7 +405,7 @@ export async function snapshot(
   return {
     root: repo,
     name: path.basename(repo),
-    branch: branch.trim(),
+    branch: branch.trim().replace(/^refs\/heads\//, ""),
     upstream: current?.upstream ?? "",
     ahead,
     behind,
@@ -401,8 +416,8 @@ export async function snapshot(
       .split("\n")
       .filter(Boolean)
       .map((row) => {
-        const [name, hash] = row.split("\0");
-        return { name, hash };
+        const [ref, hash] = row.split("\0");
+        return { name: ref.slice("refs/tags/".length), hash };
       }),
     remotes: await Promise.all(
       remoteRows

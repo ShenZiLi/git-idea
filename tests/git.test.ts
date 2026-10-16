@@ -393,3 +393,67 @@ test("API initializes, opens and remembers an empty repository and validates pre
     await fs.rm(base, { recursive: true, force: true });
   }
 });
+
+test("branch and tag identities remain distinct when their names collide", async () => {
+  const f = await fixture();
+  try {
+    await f.write("base.txt", "base");
+    await mutate(f.repo, "stage", {});
+    await mutate(f.repo, "commit", { message: "base" });
+    await mutate(f.repo, "tag.create", { name: "shared" });
+    await mutate(f.repo, "branch.create", { name: "shared" });
+    await f.write("branch.txt", "branch");
+    await mutate(f.repo, "stage", {});
+    await mutate(f.repo, "commit", { message: "branch head" });
+    const state = await snapshot(f.repo);
+    assert.equal(state.branch, "shared");
+    assert.equal(state.branches.find((b) => b.current)?.name, "shared");
+    assert.deepEqual(
+      state.tags.map((t) => t.name),
+      ["shared"],
+    );
+    assert.equal(
+      (await history(f.repo, { ref: "refs/heads/shared" }))[0].subject,
+      "branch head",
+    );
+    assert.equal(
+      (await history(f.repo, { ref: "refs/tags/shared" }))[0].subject,
+      "base",
+    );
+    await mutate(f.repo, "branch.create", {
+      name: "from-shared",
+      start: "refs/heads/shared",
+    });
+    assert.equal((await snapshot(f.repo)).head?.subject, "branch head");
+  } finally {
+    await f.clean();
+  }
+});
+
+test("an unborn current branch preserves other histories and permits empty branch creation", async () => {
+  const f = await fixture();
+  try {
+    await mutate(f.repo, "branch.create", { name: "new-empty" });
+    assert.equal((await snapshot(f.repo)).branch, "new-empty");
+    await f.write("base.txt", "base");
+    await mutate(f.repo, "stage", {});
+    await mutate(f.repo, "commit", { message: "existing history" });
+    await mutate(f.repo, "tag.create", { name: "retained-history" });
+    await git(f.repo, ["switch", "--orphan", "unborn"]);
+    const state = await snapshot(f.repo);
+    assert.equal(state.head, null);
+    assert.equal(state.commits[0]?.subject, "existing history");
+    assert.deepEqual(await history(f.repo, { ref: "HEAD" }), []);
+    assert.equal(
+      (await history(f.repo, { ref: "refs/heads/new-empty" })).length,
+      1,
+    );
+    await git(f.repo, ["update-ref", "-d", "refs/heads/new-empty"]);
+    assert.deepEqual(
+      await history(f.repo, { ref: "refs/heads/new-empty" }),
+      [],
+    );
+  } finally {
+    await f.clean();
+  }
+});
