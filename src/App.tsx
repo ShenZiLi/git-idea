@@ -113,8 +113,7 @@ export default function App() {
     [uiScale, setUiScale] = useState(100),
     [fontSize, setFontSize] = useState(13),
     [uiFontFamily, setUiFontFamily] = useState(""),
-    [editorFontFamily, setEditorFontFamily] = useState(""),
-    [status, setStatus] = useState("就绪");
+    [editorFontFamily, setEditorFontFamily] = useState("");
   const [widths, setWidths] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem("git-idea-panels") || "{}") as {
@@ -158,7 +157,6 @@ export default function App() {
             : next.commits[0]?.hash || "",
         );
         if (files) setVersion((v) => v + 1);
-        setStatus("已同步本地仓库");
         setLogs(await request<CommandLog[]>("logs"));
       } catch (e) {
         if (id === refreshSequence.current) notify((e as Error).message, true);
@@ -256,7 +254,6 @@ export default function App() {
       const target = repoRef.current;
       busyRef.current = true;
       setBusy(true);
-      setStatus(`正在执行 ${action}…`);
       let completed = false;
       try {
         if (editorFlush.current && !(await editorFlush.current()))
@@ -1214,28 +1211,6 @@ export default function App() {
           </IconButton>
         </nav>
       </div>
-      <footer className="statusbar">
-        <span className={`status-dot ${busy ? "busy" : ""}`} />
-        {busy && <Spinner />}
-        <span className="status-message truncate">
-          {busy ? status : repo ? repo : "Git IDEA · 跨平台 Git 客户端"}
-        </span>
-        <span className="spacer" />
-        <span className="status-count">
-          {snapshot?.changes.length || 0} 个更改
-        </span>
-        <span className="status-divider" />
-        <span>UTF-8</span>
-        <span className="status-divider" />
-        <button onClick={() => snapshot && setSwitcher(true)}>
-          <GitBranch size={12} />
-          {snapshot?.branch || "无仓库"}
-        </button>
-        <span className="status-divider" />
-        <span className="tiny">
-          {snapshot?.gitVersion.replace("git version ", "Git ") || "本地 Git"}
-        </span>
-      </footer>
       <Presence>
         {toast && (
           <Notification
