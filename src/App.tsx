@@ -992,20 +992,6 @@ export default function App() {
           >
             <SidebarIcon name="project" />
           </IconButton>
-          <IconButton
-            title="提交（Ctrl K）"
-            active={commitVisible}
-            onClick={() => setCommitVisible(!commitVisible)}
-          >
-            <SidebarIcon name="commit" />
-          </IconButton>
-          <IconButton
-            title="分支"
-            disabled={!snapshot}
-            onClick={() => setSwitcher(true)}
-          >
-            <SidebarIcon name="branch" />
-          </IconButton>
           <span className="rail-spacer" />
           <IconButton
             title="Git 日志（Ctrl 9）"
@@ -1019,20 +1005,6 @@ export default function App() {
             }}
           >
             <SidebarIcon name="log" />
-          </IconButton>
-          <IconButton
-            title="Git 控制台"
-            active={logVisible && bottomTab === "console"}
-            onClick={() => {
-              setLogVisible(true);
-              setBottomTab("console");
-              void request<CommandLog[]>("logs").then(setLogs);
-            }}
-          >
-            <SidebarIcon name="terminal" />
-          </IconButton>
-          <IconButton title="帮助" onClick={() => setHelp(true)}>
-            <SidebarIcon name="help" />
           </IconButton>
         </nav>
         <main
