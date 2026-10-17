@@ -89,7 +89,7 @@ app.whenReady().then(async () => {
       height: 1000,
       minWidth: 1000,
       minHeight: 680,
-      backgroundColor: "#1e1f22",
+      backgroundColor: preferences.theme === "light" ? "#e4edf7" : "#090909",
       frame: false,
       title: "Git IDEA",
       icon: path.join(__dirname, "../dist/icon.png"),
