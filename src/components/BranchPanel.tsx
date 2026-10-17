@@ -185,10 +185,6 @@ export function BranchPanel({
           </button>
         </Group>
       </div>
-      <div className="panel-foot">
-        <GitBranch size={12} />
-        <span>{s?.branch || "无仓库"}</span>
-      </div>
     </aside>
   );
 }
