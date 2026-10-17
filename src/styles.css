@@ -428,11 +428,6 @@ hr {
   justify-content: center;
   -webkit-app-region: drag;
 }
-.title-subtle {
-  color: var(--faint);
-  font-size: 11px;
-  letter-spacing: 0.5px;
-}
 .top-git-actions {
   display: flex;
   align-items: center;
@@ -2450,9 +2445,6 @@ hr {
   user-select: text;
 }
 @media (max-width: 1300px) {
-  .title-subtle {
-    display: none;
-  }
   .log-columns,
   .log-row {
     grid-template-columns: minmax(0, 1fr) 85px 99px;
@@ -2720,9 +2712,6 @@ button.primary {
   background: var(--glass-reflection), var(--glass-fill);
   border-bottom-color: var(--glass-edge);
   box-shadow: inset 0 1px 0 var(--glass-highlight);
-}
-.title-subtle {
-  color: var(--muted);
 }
 .project-selector,
 .branch-selector {

@@ -888,9 +888,7 @@ export default function App() {
           )}
           <ChevronDown size={12} />
         </button>
-        <div className="title-drag">
-          <span className="title-subtle">Git 工作空间</span>
-        </div>
+        <div className="title-drag" />
         <div className="top-git-actions">
           <IconButton
             title="获取远程更新"
