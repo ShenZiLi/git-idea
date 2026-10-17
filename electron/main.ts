@@ -24,6 +24,8 @@ protocol.registerSchemesAsPrivileged([
 let window: BrowserWindow | null = null;
 const devURL = process.env.VITE_DEV_SERVER_URL;
 const appURL = "gitidea://app";
+const windowBackground = (theme?: string) =>
+  theme === "light" ? "#e4edf7" : "#090909";
 app.setName("Git IDEA");
 app.whenReady().then(async () => {
   const root = path.join(__dirname, "../dist");
@@ -58,10 +60,14 @@ app.whenReady().then(async () => {
   ipcMain.handle("git:request", async (event, request) => {
     trusted(event);
     const result = await api(request);
-    if (request.method === "preferences")
+    if (request.method === "preferences") {
+      window?.setBackgroundColor(
+        windowBackground((result as Preferences).theme),
+      );
       window?.webContents.setZoomFactor(
         normalizeUiScale((result as Preferences).uiScale) / 100,
       );
+    }
     return result;
   });
   ipcMain.handle("git:choose-directory", async (event) => {
@@ -89,7 +95,7 @@ app.whenReady().then(async () => {
       height: 1000,
       minWidth: 1000,
       minHeight: 680,
-      backgroundColor: preferences.theme === "light" ? "#e4edf7" : "#090909",
+      backgroundColor: windowBackground(preferences.theme),
       frame: false,
       title: "Git IDEA",
       icon: path.join(__dirname, "../dist/icon.png"),
