@@ -1,21 +1,35 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   AlertTriangle,
+  Archive,
+  ArrowLeftRight,
   Check,
-  ChevronDown,
-  GitCommitHorizontal,
+  ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  Crosshair,
+  Eye,
   Minus,
-  Plus,
+  MoreVertical,
   RefreshCw,
   RotateCcw,
-  Settings2,
 } from "lucide-react";
 import type { Change, RepoSnapshot } from "../../shared/types";
-import { Empty, FileIcon, Group, IconButton, PanelHeader, Spinner } from "./ui";
+import { Popover } from "./Dialogs";
+import {
+  ChangeFileRow,
+  isStaged,
+  isUnstaged,
+  StageCheckbox,
+  UntrackedBrowser,
+} from "./CommitFiles";
+import { CommitMessage } from "./CommitMessage";
+import { Presence } from "./Motion";
+import { Empty, IconButton, PanelHeader } from "./ui";
 
-export const isStaged = (c: Change) =>
-  c.index !== " " && c.index !== "?" && !c.conflict;
-export const isUnstaged = (c: Change) => c.worktree !== " " || c.conflict;
+export { isStaged, isUnstaged } from "./CommitFiles";
+
 export function CommitPanel({
   snapshot: s,
   busy,
@@ -24,6 +38,9 @@ export function CommitPanel({
   refresh,
   confirm,
   settings,
+  stash,
+  onHide,
+  activePath,
 }: {
   snapshot: RepoSnapshot | null;
   busy: boolean;
@@ -39,133 +56,233 @@ export function CommitPanel({
     action: () => Promise<unknown>,
   ) => void;
   settings: () => void;
+  stash: () => void;
+  onHide: () => void;
+  activePath?: string;
 }) {
-  const [message, setMessage] = useState(""),
-    [amend, setAmend] = useState(false),
-    [stagedOpen, setStagedOpen] = useState(true),
-    [workingOpen, setWorkingOpen] = useState(true);
-  const [localError, setLocalError] = useState("");
-  const staged = s?.changes.filter(isStaged) || [],
-    unstaged = s?.changes.filter(isUnstaged) || [];
+  const [workingOpen, setWorkingOpen] = useState(true),
+    [visibleCount, setVisibleCount] = useState(100);
+  const [selected, setSelected] = useState(""),
+    [moreOpen, setMoreOpen] = useState(false);
+  const [browser, setBrowser] = useState<{ path?: string } | null>(null);
+  const menuAnchor = useRef<HTMLDivElement>(null),
+    rows = useRef(new Map<string, HTMLDivElement>());
+  const pendingLocate = useRef("");
+  const { tracked, untracked, staged, unstaged } = useMemo(() => {
+    const changes = s?.changes || [];
+    return {
+      tracked: changes.filter((c) => c.index !== "?"),
+      untracked: changes.filter((c) => c.index === "?"),
+      staged: changes.filter(isStaged),
+      unstaged: changes.filter(isUnstaged),
+    };
+  }, [s?.changes]);
+  const eligible = tracked.filter((c) => !c.conflict),
+    included = eligible.filter(isStaged);
+  const allStaged =
+    Boolean(eligible.length) &&
+    eligible.every((c) => isStaged(c) && !isUnstaged(c));
+  const mixed = Boolean(included.length) && !allStaged;
+  const current = s?.changes.find((c) => c.path === selected),
+    active = s?.changes.find((c) => c.path === activePath);
   useEffect(() => {
-    setMessage("");
-    setAmend(false);
-    setLocalError("");
+    setSelected("");
+    setMoreOpen(false);
+    setBrowser(null);
+    setWorkingOpen(true);
+    setVisibleCount(100);
+    pendingLocate.current = "";
   }, [s?.root]);
-  async function commit(push = false) {
-    if (!message.trim()) {
-      setLocalError("请输入提交信息");
-      return;
+  useLayoutEffect(() => {
+    const node = rows.current.get(pendingLocate.current);
+    if (node) {
+      node.scrollIntoView({ block: "nearest" });
+      node
+        .querySelector<HTMLButtonElement>(".change-file")
+        ?.focus({ preventScroll: true });
+      pendingLocate.current = "";
     }
-    if (!staged.length && !amend) {
-      setLocalError("请先暂存要提交的文件");
-      return;
-    }
-    setLocalError("");
-    if (await mutate("commit", { message, amend })) {
-      setMessage("");
-      setAmend(false);
-      if (push)
-        await mutate(
-          "push",
-          s?.upstream ? {} : { remote: s?.remotes[0]?.name, branch: s?.branch },
-        );
+  }, [workingOpen, visibleCount, selected]);
+  function discard(change: Change) {
+    confirm(
+      "丢弃未暂存改动",
+      `文件：${change.path}\n${change.index === "?" ? "该文件尚未被 Git 托管，将从磁盘删除。" : "未暂存的改动将被丢弃，已暂存的内容会保留。"}`,
+      () => mutate("discard", { paths: [change.path] }),
+    );
+  }
+  function resolve(change: Change) {
+    confirm(
+      "标记冲突已解决",
+      `确认已编辑并保存 ${change.path}，且已经移除所有冲突标记？`,
+      () => mutate("resolve", { paths: [change.path] }),
+    );
+  }
+  function locate() {
+    if (!active) return;
+    setSelected(active.path);
+    if (active.index === "?") setBrowser({ path: active.path });
+    else {
+      pendingLocate.current = active.path;
+      setWorkingOpen(true);
+      setVisibleCount(Math.max(visibleCount, tracked.indexOf(active) + 1));
+      const node = rows.current.get(active.path);
+      if (node) {
+        node.scrollIntoView({ block: "nearest" });
+        node
+          .querySelector<HTMLButtonElement>(".change-file")
+          ?.focus({ preventScroll: true });
+        pendingLocate.current = "";
+      }
     }
   }
-  const file = (c: Change, stage: boolean) => (
-    <div
-      key={`${c.path}-${stage}`}
-      className={`change-row ${c.conflict ? "conflicted" : ""}`}
-    >
-      <input
-        aria-label={`${stage ? "取消暂存" : "暂存"} ${c.path}`}
-        type="checkbox"
-        checked={stage}
-        disabled={busy || c.conflict}
-        onChange={() =>
-          void mutate(stage ? "unstage" : "stage", { paths: [c.path] })
-        }
-      />
-      <button title={c.path} onClick={() => openDiff(c.path, stage)}>
-        <FileIcon name={c.path} />
-        <span className="truncate">{c.path.split("/").at(-1)}</span>
-        <span
-          className={`change-letter ${c.conflict ? "conflicted" : c.index === "?" ? "untracked" : "modified"}`}
-        >
-          {c.conflict
-            ? "!"
-            : c.index === "?"
-              ? "U"
-              : stage
-                ? c.index
-                : c.worktree}
-        </span>
-      </button>
-      {c.conflict && (
-        <IconButton
-          title={`标记 ${c.path} 已解决`}
-          disabled={busy}
-          onClick={() =>
-            confirm(
-              "标记冲突已解决",
-              `确认已编辑并保存 ${c.path}，且已经移除所有冲突标记？`,
-              () => mutate("resolve", { paths: [c.path] }),
-            )
-          }
-        >
-          <Check size={13} />
-        </IconButton>
-      )}
-      {!stage && (
-        <IconButton
-          title={`丢弃 ${c.path} 的工作区改动`}
-          disabled={busy || c.conflict}
-          onClick={() =>
-            confirm(
-              "丢弃工作区改动",
-              `文件：${c.path}\n未暂存的改动将被丢弃；未跟踪的文件会被删除。`,
-              () => mutate("discard", { paths: [c.path] }),
-            )
-          }
-        >
-          <RotateCcw size={12} />
-        </IconButton>
-      )}
-    </div>
-  );
   return (
     <section className="commit-panel panel">
       <PanelHeader title="提交" count={s?.changes.length || 0}>
-        <IconButton title="提交设置" onClick={settings}>
-          <Settings2 size={14} />
+        <div className="popover-anchor" ref={menuAnchor}>
+          <IconButton
+            title="更多更改操作"
+            aria-haspopup="menu"
+            aria-expanded={moreOpen}
+            onClick={() => setMoreOpen(!moreOpen)}
+          >
+            <MoreVertical size={15} />
+          </IconButton>
+          <Popover
+            open={moreOpen}
+            onClose={() => setMoreOpen(false)}
+            label="更改操作"
+            anchor={menuAnchor}
+            className="commit-panel-menu"
+          >
+            <button
+              role="menuitem"
+              disabled={busy || !unstaged.some((c) => !c.conflict)}
+              onClick={() => {
+                setMoreOpen(false);
+                const paths = unstaged
+                  .filter((c) => !c.conflict)
+                  .map((c) => c.path);
+                if (paths.length) void mutate("stage", { paths });
+              }}
+            >
+              暂存所有更改（含未托管文件）
+            </button>
+            <button
+              role="menuitem"
+              disabled={busy || !staged.length}
+              onClick={() => {
+                setMoreOpen(false);
+                void mutate("unstage");
+              }}
+            >
+              取消全部暂存
+            </button>
+            <button
+              role="menuitem"
+              disabled={!untracked.length}
+              onClick={() => {
+                setMoreOpen(false);
+                setBrowser({});
+              }}
+            >
+              浏览未托管文件…
+            </button>
+            <div className="menu-divider" />
+            <button
+              role="menuitem"
+              onClick={() => {
+                setMoreOpen(false);
+                settings();
+              }}
+            >
+              提交设置…
+            </button>
+          </Popover>
+        </div>
+        <IconButton title="隐藏提交栏" onClick={onHide}>
+          <Minus size={15} />
         </IconButton>
       </PanelHeader>
-      <div className="panel-toolbar">
-        <IconButton title="刷新更改" disabled={busy} onClick={refresh}>
+      <div className="panel-toolbar commit-toolbar">
+        <IconButton title="刷新更改" disabled={busy || !s} onClick={refresh}>
           <RefreshCw size={15} />
         </IconButton>
         <IconButton
-          title="暂存所有更改"
-          disabled={busy || !unstaged.length}
-          onClick={() => void mutate("stage")}
+          title="回滚选中文件的未暂存改动…"
+          disabled={
+            busy || !current || !isUnstaged(current) || current.conflict
+          }
+          onClick={() => current && discard(current)}
         >
-          <Plus size={16} />
+          <RotateCcw size={15} />
         </IconButton>
         <IconButton
-          title="取消全部暂存"
-          disabled={busy || !staged.length}
-          onClick={() => void mutate("unstage")}
+          title={
+            current && isStaged(current) ? "取消暂存选中文件" : "暂存选中文件"
+          }
+          disabled={busy || !current || current.conflict}
+          onClick={() =>
+            current &&
+            void mutate(isStaged(current) ? "unstage" : "stage", {
+              paths: [current.path],
+            })
+          }
         >
-          <Minus size={16} />
+          <ArrowLeftRight size={16} />
+        </IconButton>
+        <IconButton
+          title="储藏全部更改…"
+          disabled={
+            busy ||
+            !s?.changes.length ||
+            s.changes.some((c) => c.conflict) ||
+            Boolean(s.operation)
+          }
+          onClick={stash}
+        >
+          <Archive size={15} />
+        </IconButton>
+        <IconButton
+          title="查看选中文件差异"
+          disabled={!current}
+          onClick={() =>
+            current &&
+            openDiff(current.path, !isUnstaged(current) && isStaged(current))
+          }
+        >
+          <Eye size={16} />
         </IconButton>
         <span className="toolbar-divider" />
-        <span className="tiny muted">{staged.length} 个文件待提交</span>
+        <IconButton
+          title="定位当前文件的更改"
+          disabled={!active}
+          onClick={locate}
+        >
+          <Crosshair size={15} />
+        </IconButton>
+        <IconButton
+          title="展开所有更改"
+          disabled={!tracked.length}
+          onClick={() => {
+            setWorkingOpen(true);
+          }}
+        >
+          <ChevronsUpDown size={15} />
+        </IconButton>
+        <IconButton
+          title="收起所有更改"
+          disabled={!tracked.length}
+          onClick={() => setWorkingOpen(false)}
+        >
+          <ChevronsDownUp size={15} />
+        </IconButton>
       </div>
       {s?.operation && (
         <div className="operation-banner">
           <AlertTriangle size={14} />
           <span>正在进行 {s.operation}</span>
           <button
+            disabled={busy}
             onClick={() =>
               confirm(
                 "中止 Git 操作",
@@ -177,7 +294,7 @@ export function CommitPanel({
             中止
           </button>
           <button
-            disabled={s.changes.some((c) => c.conflict)}
+            disabled={busy || s.changes.some((c) => c.conflict)}
             onClick={() =>
               void mutate("operation.continue", { operation: s.operation })
             }
@@ -187,26 +304,85 @@ export function CommitPanel({
         </div>
       )}
       <div className="changes-scroll">
-        <Group
-          name="已暂存"
-          count={staged.length}
-          open={stagedOpen}
-          onToggle={() => setStagedOpen(!stagedOpen)}
-        >
-          {staged.length ? (
-            staged.map((c) => file(c, true))
-          ) : (
-            <div className="group-empty">暂存后，文件会显示在这里</div>
-          )}
-        </Group>
-        <Group
-          name="工作区更改"
-          count={unstaged.length}
-          open={workingOpen}
-          onToggle={() => setWorkingOpen(!workingOpen)}
-        >
-          {unstaged.map((c) => file(c, false))}
-        </Group>
+        {Boolean(tracked.length) && (
+          <section className="commit-change-group">
+            <div className="commit-group-heading">
+              <IconButton
+                title={workingOpen ? "收起更改" : "展开更改"}
+                aria-expanded={workingOpen}
+                onClick={() => setWorkingOpen(!workingOpen)}
+              >
+                <ChevronRight
+                  size={13}
+                  className={workingOpen ? "rotate" : ""}
+                />
+              </IconButton>
+              <StageCheckbox
+                label="暂存或取消暂存全部已托管更改"
+                checked={allStaged}
+                mixed={mixed}
+                disabled={busy || !eligible.length}
+                onChange={(checked) => {
+                  const paths = (
+                    checked ? eligible.filter(isUnstaged) : included
+                  ).map((c) => c.path);
+                  if (paths.length)
+                    void mutate(checked ? "stage" : "unstage", { paths });
+                }}
+              />
+              <button
+                className="commit-group-label"
+                aria-expanded={workingOpen}
+                onClick={() => setWorkingOpen(!workingOpen)}
+              >
+                更改
+                <span className="muted">
+                  {tracked.length.toLocaleString("zh-CN")} 个文件
+                </span>
+              </button>
+            </div>
+            {workingOpen &&
+              tracked.slice(0, visibleCount).map((c) => (
+                <ChangeFileRow
+                  key={c.path}
+                  change={c}
+                  busy={busy}
+                  selected={selected === c.path}
+                  rowRef={(node) => {
+                    if (node) rows.current.set(c.path, node);
+                    else rows.current.delete(c.path);
+                  }}
+                  onSelect={() => setSelected(c.path)}
+                  onStage={(stage) =>
+                    void mutate(stage ? "stage" : "unstage", {
+                      paths: [c.path],
+                    })
+                  }
+                  onDiff={(stage) => openDiff(c.path, stage)}
+                  onDiscard={() => discard(c)}
+                  onResolve={() => resolve(c)}
+                />
+              ))}
+            {workingOpen && tracked.length > visibleCount && (
+              <button
+                className="more-changes"
+                onClick={() => setVisibleCount(visibleCount + 100)}
+              >
+                显示更多（剩余{" "}
+                {(tracked.length - visibleCount).toLocaleString("zh-CN")} 个）
+              </button>
+            )}
+          </section>
+        )}
+        {Boolean(untracked.length) && (
+          <div className="untracked-summary">
+            <span>未进行版本管理的文件</span>
+            <span className="muted">
+              {untracked.length.toLocaleString("zh-CN")} 个文件
+            </span>
+            <button onClick={() => setBrowser({})}>浏览</button>
+          </div>
+        )}
         {s && !s.changes.length && (
           <Empty
             icon={<Check size={26} className="green" />}
@@ -215,80 +391,33 @@ export function CommitPanel({
             <span>所有更改均已提交</span>
           </Empty>
         )}
+        {!s && <Empty title="尚未打开仓库" />}
       </div>
-      <div className="commit-form">
-        <div className="commit-options">
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              checked={amend}
-              disabled={!s?.head || busy}
-              onChange={(e) => {
-                setAmend(e.target.checked);
-                if (e.target.checked)
-                  setMessage(
-                    s?.head
-                      ? [s.head.subject, s.head.body]
-                          .filter(Boolean)
-                          .join("\n\n")
-                      : "",
-                  );
+      <CommitMessage
+        snapshot={s}
+        stagedCount={staged.length}
+        {...{ busy, mutate, confirm, settings }}
+      />
+      {createPortal(
+        <Presence>
+          {browser && (
+            <UntrackedBrowser
+              changes={untracked}
+              busy={busy}
+              initialPath={browser.path}
+              selected={selected}
+              onSelect={setSelected}
+              {...{ mutate, openDiff }}
+              onDiscard={(c) => {
+                setBrowser(null);
+                discard(c);
               }}
+              onClose={() => setBrowser(null)}
             />
-            修订上次提交
-          </label>
-          <ChevronDown size={12} />
-        </div>
-        <textarea
-          aria-label="提交信息"
-          value={message}
-          onChange={(e) => {
-            setMessage(e.target.value);
-            setLocalError("");
-          }}
-          placeholder="提交信息…"
-          onKeyDown={(e) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-              e.preventDefault();
-              void commit();
-            }
-          }}
-          disabled={busy || !s}
-        />
-        {localError && (
-          <div className="form-error" role="alert">
-            {localError}
-          </div>
-        )}
-        {s && (!s.identity.name || !s.identity.email) && (
-          <button className="identity-warning" onClick={settings}>
-            <AlertTriangle size={12} />
-            设置提交者姓名和邮箱
-          </button>
-        )}
-        <div className="commit-actions">
-          <button
-            className="primary"
-            disabled={busy || !s || (!staged.length && !amend)}
-            onClick={() => void commit()}
-          >
-            {busy ? <Spinner /> : <GitCommitHorizontal size={14} />}提交
-            <span className="key-hint">Ctrl ↵</span>
-          </button>
-          <button
-            disabled={busy || !s?.remotes.length || (!staged.length && !amend)}
-            onClick={() =>
-              confirm(
-                "提交并推送",
-                `提交已暂存的文件，并将 ${s?.branch} 推送到 ${s?.upstream || `${s?.remotes[0]?.name}/${s?.branch}`}。`,
-                () => commit(true),
-              )
-            }
-          >
-            提交并推送…
-          </button>
-        </div>
-      </div>
+          )}
+        </Presence>,
+        document.body,
+      )}
     </section>
   );
 }

@@ -5,7 +5,9 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   AlertTriangle,
   Check,
@@ -134,15 +136,38 @@ export function Popover({
   onClose,
   label,
   className = "",
+  anchor,
+  above = false,
   children,
 }: {
   open: boolean;
   onClose: () => void;
   label: string;
   className?: string;
+  anchor?: RefObject<HTMLElement | null>;
+  above?: boolean;
   children: ReactNode;
 }) {
-  return (
+  const [position, setPosition] = useState({ top: 0, right: 0 });
+  useLayoutEffect(() => {
+    if (!open || !anchor) return;
+    const update = () => {
+      const rect = anchor.current?.getBoundingClientRect();
+      if (rect)
+        setPosition({
+          top: above ? rect.top : rect.bottom,
+          right: Math.max(12, window.innerWidth - rect.right),
+        });
+    };
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [open, anchor, above]);
+  const content = (
     <Presence>
       {open && (
         <PopoverSurface onClose={onClose} label={label} className={className}>
@@ -151,6 +176,17 @@ export function Popover({
       )}
     </Presence>
   );
+  return anchor
+    ? createPortal(
+        <div
+          className={`popover-portal-anchor ${above ? "popover-above" : ""}`}
+          style={position}
+        >
+          {content}
+        </div>,
+        document.body,
+      )
+    : content;
 }
 
 function PopoverSurface({
@@ -171,7 +207,7 @@ function PopoverSurface({
   useLayoutEffect(() => {
     if (!present) return;
     const previous = document.activeElement as HTMLElement | null;
-    ref.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    ref.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
     const handler = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();

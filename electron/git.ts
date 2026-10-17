@@ -736,35 +736,52 @@ async function prepareCommitIndex(repo: string, stagePaths?: string[]) {
     if (stagePaths !== undefined)
       await git(
         repo,
-        ["add", "--", ...(stagePaths.length ? stagePaths : ["."])],
-        undefined,
+        ["add", "--pathspec-from-file=-", "--pathspec-file-nul"],
+        (stagePaths.length ? stagePaths : ["."]).join("\0") + "\0",
         [0],
         env,
       );
     const selected = stagePaths?.length ? stagePaths : [];
+    // Large selections must not exceed Windows' process argument limit.
+    const readAll =
+      selected.reduce((size, file) => size + file.length + 3, 0) > 8000;
+    const selectedSet = new Set(selected);
+    const matchesSelection = (file: string) => {
+      if (!readAll || selectedSet.has(".") || selectedSet.has(file))
+        return true;
+      let separator = file.lastIndexOf("/");
+      while (separator > 0) {
+        if (selectedSet.has(file.slice(0, separator))) return true;
+        separator = file.lastIndexOf("/", separator - 1);
+      }
+      return false;
+    };
+    const pathArgs = readAll ? [] : selected;
     const head = await hasHead(repo);
     const [entries, tree] = await Promise.all([
       git(
         repo,
-        ["ls-files", "--stage", "-z", "--", ...selected],
+        ["ls-files", "--stage", "-z", "--", ...pathArgs],
         undefined,
         [0],
         env,
       ),
       head
-        ? git(repo, ["ls-tree", "-r", "-z", "HEAD", "--", ...selected])
+        ? git(repo, ["ls-tree", "-r", "-z", "HEAD", "--", ...pathArgs])
         : Promise.resolve(""),
     ]);
     const originals = new Map<string, string>();
     for (const entry of tree.split("\0")) {
       const match = /^(100644|100755) blob ([a-f0-9]+)\t([\s\S]+)$/.exec(entry);
-      if (match) originals.set(match[3], match[2]);
+      if (match && matchesSelection(match[3]))
+        originals.set(match[3], match[2]);
     }
     const replacements: string[] = [];
     for (const entry of entries.split("\0")) {
       const match = /^(100644|100755) ([a-f0-9]+) 0\t([\s\S]+)$/.exec(entry);
       if (!match) continue;
       const [, mode, hash, file] = match;
+      if (!matchesSelection(file)) continue;
       const base = originals.get(file);
       if (!base || base === hash) continue;
       const sizes = await Promise.all(
@@ -843,18 +860,31 @@ export async function mutate(
       }
       case "unstage":
         return (await hasHead(repo))
-          ? git(repo, ["reset", "--", ...(paths.length ? paths : ["."])])
-          : git(repo, [
-              "rm",
-              "--cached",
-              "-r",
-              "--",
-              ...(paths.length ? paths : ["."]),
-            ]);
+          ? git(
+              repo,
+              ["reset", "--pathspec-from-file=-", "--pathspec-file-nul"],
+              (paths.length ? paths : ["."]).join("\0") + "\0",
+            )
+          : git(
+              repo,
+              [
+                "rm",
+                "--cached",
+                "-r",
+                "--pathspec-from-file=-",
+                "--pathspec-file-nul",
+              ],
+              (paths.length ? paths : ["."]).join("\0") + "\0",
+            );
       case "discard": {
         if (!paths.length) throw new Error("请选择要丢弃改动的文件");
         const changes = parseStatus(
-          await git(repo, ["status", "--porcelain=v1", "-z"]),
+          await git(repo, [
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+          ]),
         );
         for (const file of paths) {
           const change = changes.find((c) => c.path === file);

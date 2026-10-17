@@ -1081,7 +1081,9 @@ export default function App() {
             {commitVisible && (
               <CommitPanel
                 snapshot={snapshot}
-                {...{ busy, mutate, openDiff, confirm, settings }}
+                {...{ busy, mutate, openDiff, confirm, settings, stash }}
+                activePath={tab?.path}
+                onHide={() => setCommitVisible(false)}
                 refresh={() => void refresh()}
               />
             )}
