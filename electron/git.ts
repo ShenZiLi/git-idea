@@ -553,6 +553,7 @@ export async function diff(
   const file = relativeFile(repo, String(params.path ?? ""));
   let before,
     after,
+    readOnly = false,
     raw = "",
     beforeLabel = "HEAD",
     afterLabel = "工作区";
@@ -618,9 +619,10 @@ export async function diff(
       try {
         after = await readFile(repo, file);
       } catch (error) {
-        if (change?.worktree === "D")
+        if (change?.worktree === "D") {
           after = { text: "", binary: false, truncated: false };
-        else throw error;
+          readOnly = true;
+        } else throw error;
       }
       raw = await git(repo, [
         "diff",
@@ -640,6 +642,7 @@ export async function diff(
     raw,
     beforeLabel,
     afterLabel,
+    readOnly,
     binary: before.binary || after.binary,
     truncated: before.truncated || after.truncated,
   };
@@ -1085,12 +1088,26 @@ export async function mutate(
   });
 }
 
-export async function saveFile(repo: string, file: string, text: string) {
+export async function saveFile(
+  repo: string,
+  file: string,
+  text: string,
+  expectedText?: string,
+) {
   if (Buffer.byteLength(text) > MAX_TEXT)
     throw new Error("文件过大，请使用外部编辑器");
-  const diskPath = await safeDiskPath(repo, file);
-  const stat = await fs.stat(diskPath);
-  if (!stat.isFile()) throw new Error("只能保存普通文件");
-  await fs.writeFile(diskPath, text, "utf8");
-  return "文件已保存";
+  return serialize(repo, async () => {
+    const diskPath = await safeDiskPath(repo, file);
+    const stat = await fs.stat(diskPath);
+    if (!stat.isFile()) throw new Error("只能保存普通文件");
+    if (
+      expectedText !== undefined &&
+      (await fs.readFile(diskPath, "utf8")) !== expectedText
+    )
+      throw new Error(
+        "磁盘文件已被其他程序修改，请先复制保留当前草稿，再重新打开文件进行合并",
+      );
+    await fs.writeFile(diskPath, text, "utf8");
+    return "文件已保存";
+  });
 }

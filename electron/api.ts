@@ -117,7 +117,12 @@ export function createApi(
       case "file":
         return readFile(repo, String(p.path || ""), p.baseline === true);
       case "saveFile":
-        return saveFile(repo, String(p.path || ""), String(p.text ?? ""));
+        return saveFile(
+          repo,
+          String(p.path || ""),
+          String(p.text ?? ""),
+          typeof p.expectedText === "string" ? p.expectedText : undefined,
+        );
       case "diff":
         return diff(repo, p);
       case "commitDetail":

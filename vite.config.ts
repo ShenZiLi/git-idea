@@ -36,7 +36,8 @@ export default defineConfig({
             let body = "";
             for await (const chunk of req) {
               body += chunk.toString();
-              if (body.length > 3 * 1024 * 1024) throw new Error("请求过大");
+              // Autosave includes both the new text and the expected disk text.
+              if (body.length > 12 * 1024 * 1024) throw new Error("请求过大");
             }
             const data = await api(JSON.parse(body));
             res.setHeader("Content-Type", "application/json");

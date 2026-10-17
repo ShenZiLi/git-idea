@@ -127,6 +127,8 @@ export default function App() {
     }
   });
   const workbench = useRef<HTMLDivElement>(null),
+    editorFlush = useRef<(() => Promise<boolean>) | null>(null),
+    navigationRevision = useRef(0),
     identityWrites = useRef<Promise<void>>(Promise.resolve()),
     refreshSequence = useRef(0),
     repoRef = useRef(""),
@@ -167,10 +169,13 @@ export default function App() {
     [filters, notify],
   );
   async function openRepository(target: string) {
+    const revision = ++navigationRevision.current;
     try {
-      if (editorDirty)
-        throw new Error("请先保存或取消当前文件的编辑，再切换仓库。");
+      if (editorFlush.current && !(await editorFlush.current()))
+        throw new Error("自动保存尚未完成，请先处理当前文件的保存提示。");
+      if (revision !== navigationRevision.current) return false;
       const root = await request<string>("open", undefined, { path: target });
+      if (revision !== navigationRevision.current) return false;
       repoRef.current = root;
       setRepo(root);
       setTabs([]);
@@ -248,12 +253,18 @@ export default function App() {
   const mutate = useCallback(
     async (action: string, params: Record<string, unknown> = {}) => {
       if (busyRef.current || !repoRef.current) return false;
+      const target = repoRef.current;
       busyRef.current = true;
       setBusy(true);
       setStatus(`正在执行 ${action}…`);
       let completed = false;
       try {
-        const output = await request<string>("mutate", repoRef.current, {
+        if (editorFlush.current && !(await editorFlush.current()))
+          throw new Error(
+            "文件尚未保存，已暂停 Git 操作，请先处理编辑区的保存提示。",
+          );
+        if (target !== repoRef.current) return false;
+        const output = await request<string>("mutate", target, {
           ...params,
           action,
         });
@@ -298,16 +309,14 @@ export default function App() {
     action: () => Promise<unknown>,
   ) => setConfirmation({ title, message, action });
   function guardDraft(action: () => void) {
-    if (editorDirty)
-      confirm(
-        "放弃未保存的编辑",
-        "当前文件还有未保存的编辑，确认放弃并继续？",
-        async () => {
-          setEditorDirty(false);
-          action();
-        },
-      );
-    else action();
+    const revision = ++navigationRevision.current;
+    void (async () => {
+      if (editorFlush.current && !(await editorFlush.current())) {
+        notify("自动保存未完成，草稿已保留。请先处理编辑区的保存提示。", true);
+        return;
+      }
+      if (revision === navigationRevision.current) action();
+    })();
   }
   function openFile(file: string, options: Partial<EditorTab> = {}) {
     const tab: EditorTab = {
@@ -1057,7 +1066,7 @@ export default function App() {
             )}
             <Editor
               repo={repo}
-              {...{ tab, tabs, version, notify, welcome }}
+              {...{ tab, tabs, version, notify, confirm, welcome }}
               active={tab?.id || ""}
               onSelect={(id) => guardDraft(() => setActiveTab(id))}
               onClose={closeTab}
@@ -1067,8 +1076,11 @@ export default function App() {
                   setActiveTab("");
                 })
               }
-              onSaved={() => void refresh()}
+              onSaved={() =>
+                void refresh(repoRef.current, filtersRef.current, false)
+              }
               onDirty={setEditorDirty}
+              flushRef={editorFlush}
             />
             {commitVisible && (
               <div

@@ -1,15 +1,18 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import {
   ArrowDown,
   ArrowUp,
   Check,
-  Columns2,
   Copy,
-  Edit3,
   FileCode2,
   GitCompareArrows,
-  Rows3,
-  Save,
   Search,
   WrapText,
   X,
@@ -18,6 +21,8 @@ import type { DiffData } from "../../shared/types";
 import { request } from "../api";
 import { diffRows } from "../diff";
 import { lineChanges, type LineChange } from "../../shared/line-changes";
+import { useFileAutosave } from "../useFileAutosave";
+import { EditorSearch, type SearchSelection } from "./EditorSearch";
 import { Empty, FileIcon, IconButton, Spinner } from "./ui";
 
 export interface EditorTab {
@@ -27,6 +32,17 @@ export interface EditorTab {
   staged?: boolean;
   commit?: string;
   oldPath?: string;
+}
+interface DisplayLine {
+  text: string;
+  oldNumber?: number;
+  newNumber?: number;
+  kind: "same" | "added" | "removed";
+}
+interface MarkRange {
+  start: number;
+  end: number;
+  active: boolean;
 }
 const normalizeLines = (text: string) => text.replaceAll("\r\n", "\n");
 function Highlight({ text }: { text: string }) {
@@ -88,6 +104,30 @@ function LineMarker({ change }: { change?: LineChange }) {
     />
   );
 }
+
+function MarkedCode({
+  text,
+  ranges = [],
+}: {
+  text: string;
+  ranges?: MarkRange[];
+}) {
+  let cursor = 0;
+  const parts: React.ReactNode[] = [];
+  ranges.forEach((range, i) => {
+    parts.push(
+      <Highlight key={`text-${i}`} text={text.slice(cursor, range.start)} />,
+    );
+    parts.push(
+      <mark key={`match-${i}`} className={range.active ? "active-match" : ""}>
+        <Highlight text={text.slice(range.start, range.end) || "\u200b"} />
+      </mark>,
+    );
+    cursor = range.end;
+  });
+  parts.push(<Highlight key="tail" text={text.slice(cursor)} />);
+  return <>{parts}</>;
+}
 export function Editor({
   repo,
   tab,
@@ -99,7 +139,9 @@ export function Editor({
   version,
   onSaved,
   onDirty,
+  flushRef,
   notify,
+  confirm,
   welcome,
 }: {
   repo: string;
@@ -112,78 +154,79 @@ export function Editor({
   version: number;
   onSaved: () => void;
   onDirty: (dirty: boolean) => void;
+  flushRef: RefObject<(() => Promise<boolean>) | null>;
   notify: (message: string, error?: boolean) => void;
   welcome: React.ReactNode;
+  confirm: (
+    title: string,
+    message: string,
+    action: () => Promise<unknown>,
+  ) => void;
 }) {
-  const [data, setData] = useState<DiffData | null>(null),
-    [loading, setLoading] = useState(false),
+  const [data, setData] = useState<DiffData | null>(null);
+  const [loading, setLoading] = useState(false),
     [error, setError] = useState("");
-  const [split, setSplit] = useState(true),
-    [wrap, setWrap] = useState(false),
-    [ignoreWhitespace, setIgnoreWhitespace] = useState(false),
-    [search, setSearch] = useState("");
-  const [edit, setEdit] = useState(false),
-    [draft, setDraft] = useState(""),
-    [saving, setSaving] = useState(false),
-    [showAll, setShowAll] = useState(false);
-  const dirty = edit && draft !== normalizeLines(data?.after || "");
-  const canEdit =
+  const [wrap, setWrap] = useState(false),
+    [ignoreWhitespace, setIgnoreWhitespace] = useState(false);
+  const [findOpen, setFindOpen] = useState(false),
+    [replaceOpen, setReplaceOpen] = useState(false);
+  const [findFocus, setFindFocus] = useState(0);
+  const [selection, setSelection] = useState<SearchSelection>({
+    matches: [],
+    active: 0,
+  });
+  const [showAll, setShowAll] = useState(false);
+  const autosave = useFileAutosave(onSaved);
+  const { draft, dirty, saving } = autosave;
+  const loadedTab = useRef("");
+  const edit =
     !!tab &&
+    loadedTab.current === `${repo}:${tab.id}` &&
     !tab.commit &&
     !tab.staged &&
     !!data &&
     !data.binary &&
     !data.truncated &&
+    !data.readOnly &&
     !loading &&
     !error;
-  const dirtyRef = useRef(false),
-    loadedTab = useRef(""),
-    loadGeneration = useRef(0),
-    savingRef = useRef(false),
-    contextRef = useRef(""),
-    focusPending = useRef(false),
-    textarea = useRef<HTMLTextAreaElement>(null),
-    gutter = useRef<HTMLDivElement>(null),
+  const panel = useRef<HTMLElement>(null),
+    textarea = useRef<HTMLTextAreaElement>(null);
+  const gutter = useRef<HTMLDivElement>(null),
     mirror = useRef<HTMLDivElement>(null);
+  const code = useRef<HTMLDivElement>(null),
+    readScroll = useRef<HTMLDivElement>(null);
   const [lineHeights, setLineHeights] = useState<number[]>([]);
-  contextRef.current = `${repo}:${tab?.id || ""}`;
-  dirtyRef.current = dirty;
+
   useLayoutEffect(() => {
-    onDirty(dirty);
-  }, [dirty, onDirty]);
+    onDirty(dirty || saving);
+  }, [dirty, saving, onDirty]);
   useLayoutEffect(() => {
-    if (gutter.current && textarea.current) {
-      gutter.current.scrollTop = textarea.current.scrollTop;
-    }
-  }, [wrap, edit, loading]);
-  useEffect(() => {
-    if (edit && !loading && focusPending.current) {
-      textarea.current?.focus();
-      focusPending.current = false;
-    }
-  }, [edit, loading]);
+    flushRef.current = autosave.flush;
+    return () => {
+      flushRef.current = null;
+    };
+  }, [flushRef, autosave.flush]);
   useEffect(() => {
     if (!tab || !repo) {
       setData(null);
-      setEdit(false);
-      setDraft("");
       setLoading(false);
+      autosave.load("", "", "", false);
       loadedTab.current = "";
-      focusPending.current = false;
       return;
     }
-    if (dirtyRef.current && loadedTab.current === `${repo}:${tab.id}`) return;
+    if (autosave.isDirty()) return;
     let current = true;
-    const generation = ++loadGeneration.current;
-    const changingTab = loadedTab.current !== `${repo}:${tab.id}`;
-    if (changingTab) {
+    const context = `${repo}:${tab.id}`;
+    const changing = loadedTab.current !== context;
+    if (changing) {
       setLoading(true);
       setData(null);
-      setEdit(false);
       setShowAll(false);
-      focusPending.current = false;
+      setSelection({ matches: [], active: 0 });
     }
     setError("");
+    const revision = autosave.getRevision();
     const query =
       tab.kind === "diff"
         ? request<DiffData>("diff", repo, {
@@ -197,51 +240,59 @@ export function Editor({
             binary: boolean;
             truncated: boolean;
             baseline?: string;
-          }>("file", repo, { path: tab.path, baseline: true }).then((file) => ({
-            path: tab.path,
-            before: file.baseline ?? "",
-            after: file.text,
-            raw: "",
-            binary: file.binary,
-            truncated: file.truncated,
-            baselineAvailable: file.baseline !== undefined,
-            beforeLabel: "",
-            afterLabel: "工作区",
-          }));
+          }>("file", repo, { path: tab.path, baseline: true }).then(
+            (file) =>
+              ({
+                path: tab.path,
+                before: file.baseline ?? "",
+                after: file.text,
+                raw: "",
+                binary: file.binary,
+                truncated: file.truncated,
+                baselineAvailable: file.baseline !== undefined,
+                beforeLabel: "HEAD",
+                afterLabel: "工作区",
+              }) as DiffData,
+          );
     query
-      .then((v) => {
+      .then((value) => {
         if (
-          current &&
-          generation === loadGeneration.current &&
-          (changingTab || !dirtyRef.current)
-        ) {
-          loadedTab.current = `${repo}:${tab.id}`;
-          setData(v);
-          setDraft(normalizeLines(v.after));
-          if (v.binary || v.truncated || tab.commit || tab.staged)
-            setEdit(false);
-          else if (changingTab) setEdit(false);
-        }
+          !current ||
+          autosave.isDirty() ||
+          revision !== autosave.getRevision()
+        )
+          return;
+        loadedTab.current = context;
+        setData(value);
+        autosave.load(
+          repo,
+          tab.path,
+          value.after,
+          !tab.commit &&
+            !tab.staged &&
+            !value.binary &&
+            !value.truncated &&
+            !value.readOnly,
+        );
       })
-      .catch(
-        (e) =>
-          current &&
-          generation === loadGeneration.current &&
-          !dirtyRef.current &&
-          setError(e.message),
-      )
-      .finally(() => current && setLoading(false));
+      .catch((cause) => {
+        if (current && !autosave.isDirty()) setError(cause.message);
+      })
+      .finally(() => {
+        if (current) setLoading(false);
+      });
     return () => {
       current = false;
     };
-  }, [repo, tab?.id, version]);
-  const rows = useMemo(
-    () =>
-      data && tab?.kind === "diff"
-        ? diffRows(data.before, data.after, ignoreWhitespace)
-        : [],
-    [data, tab?.kind, ignoreWhitespace],
-  );
+  }, [
+    repo,
+    tab?.id,
+    version,
+    autosave.load,
+    autosave.isDirty,
+    autosave.getRevision,
+  ]);
+
   const draftLines = useMemo(() => draft.split("\n"), [draft]);
   const changes = useMemo(
     () =>
@@ -253,6 +304,92 @@ export function Editor({
         : [],
     [data, edit, draft],
   );
+  const displayLines = useMemo<DisplayLine[]>(() => {
+    if (!data) return [];
+    if (tab?.kind !== "diff")
+      return normalizeLines(data.after)
+        .split("\n")
+        .map((text, i) => ({ text, newNumber: i + 1, kind: "same" }));
+    const rows = diffRows(data.before, data.after, ignoreWhitespace);
+    const lines: DisplayLine[] = [];
+    // Keep removed and added blocks together in the single-column diff.
+    for (let i = 0; i < rows.length;) {
+      const row = rows[i];
+      if (row.kind === "same") {
+        lines.push({
+          text: row.after ?? "",
+          oldNumber: row.oldNumber,
+          newNumber: row.newNumber,
+          kind: "same",
+        });
+        i++;
+        continue;
+      }
+      let end = i + 1;
+      while (end < rows.length && rows[end].kind !== "same") end++;
+      for (const changed of rows.slice(i, end))
+        if (changed.before !== undefined)
+          lines.push({
+            text: changed.before,
+            oldNumber: changed.oldNumber,
+            kind: "removed",
+          });
+      for (const changed of rows.slice(i, end))
+        if (changed.after !== undefined)
+          lines.push({
+            text: changed.after,
+            newNumber: changed.newNumber,
+            kind: "added",
+          });
+      i = end;
+    }
+    return lines;
+  }, [data, tab?.kind, ignoreWhitespace]);
+  const visibleText = useMemo(
+    () => (edit ? draft : displayLines.map((line) => line.text).join("\n")),
+    [edit, draft, displayLines],
+  );
+  const searchRanges = useMemo(() => {
+    const lines = visibleText.split("\n"),
+      ranges: MarkRange[][] = lines.map(() => []);
+    let line = 0,
+      offset = 0;
+    selection.matches.forEach((match, index) => {
+      while (
+        line < lines.length - 1 &&
+        offset + lines[line].length < match.start
+      )
+        offset += lines[line++].length + 1;
+      let next = line,
+        start = offset;
+      while (next < lines.length && start <= match.end) {
+        const end = start + lines[next].length;
+        if (match.start <= end && match.end >= start)
+          ranges[next].push({
+            start: Math.max(0, match.start - start),
+            end: Math.min(lines[next].length, match.end - start),
+            active: selection.active === index,
+          });
+        if (match.end <= end) break;
+        start = end + 1;
+        next++;
+      }
+    });
+    return ranges;
+  }, [visibleText, selection]);
+
+  const syncScroll = () => {
+    const input = textarea.current;
+    if (!input) return;
+    if (gutter.current) gutter.current.scrollTop = input.scrollTop;
+    if (code.current) {
+      code.current.style.width = wrap
+        ? `${input.clientWidth}px`
+        : "max-content";
+      code.current.style.transform = `translate(${-input.scrollLeft}px, ${-input.scrollTop}px)`;
+    }
+  };
+  useLayoutEffect(syncScroll, [wrap, edit, loading, draft]);
   useLayoutEffect(() => {
     if (!edit || !wrap || !textarea.current || !mirror.current) return;
     const input = textarea.current,
@@ -276,91 +413,190 @@ export function Editor({
     update();
     return () => observer.disconnect();
   }, [draftLines, edit, wrap, loading]);
-  const fileLines = data?.after.replaceAll("\r\n", "\n").split("\n") || [];
-  const matches = useMemo(
-    () =>
-      rows
-        .map((row, i) => (row.kind !== "same" ? i : -1))
-        .filter((i) => i >= 0),
-    [rows],
-  );
-  const jump = (direction: number) => {
-    const container = document.querySelector(".code-scroll");
-    if (!container) return;
-    const current = Math.floor(container.scrollTop / 22);
-    const match =
-      direction > 0
-        ? (matches.find((i) => i > current + 1) ?? matches[0])
-        : ([...matches].reverse().find((i) => i < current - 1) ??
-          matches.at(-1));
-    if (match !== undefined)
-      container.scrollTo({
-        top: Math.max(0, match * 22 - 44),
-        behavior: "smooth",
-      });
-  };
-  const save = async () => {
-    if (!tab || !canEdit || !dirty || savingRef.current) return;
-    const context = contextRef.current;
-    const text = data!.after.includes("\r\n")
-      ? draft.replaceAll("\n", "\r\n")
-      : draft;
-    savingRef.current = true;
-    ++loadGeneration.current;
-    setSaving(true);
-    try {
-      await request("saveFile", repo, { path: tab.path, text });
-      if (contextRef.current === context) {
-        setData((current) => (current ? { ...current, after: text } : current));
-        setDraft(normalizeLines(text));
-        if (tab.kind === "diff") setEdit(false);
+
+  const reveal = (next: SearchSelection) => {
+    setSelection(next);
+    const match = next.matches[next.active];
+    if (!match) return;
+    const line = visibleText.slice(0, match.start).split("\n").length - 1;
+    if (edit && textarea.current) {
+      const input = textarea.current;
+      input.setSelectionRange(match.start, match.end);
+      const top = wrap
+        ? lineHeights.slice(0, line).reduce((sum, height) => sum + height, 0)
+        : line * 22;
+      input.scrollTop = Math.max(0, top - input.clientHeight / 2 + 22);
+      if (!wrap) {
+        const lineStart = visibleText.lastIndexOf("\n", match.start - 1) + 1;
+        const prefix = visibleText.slice(lineStart, match.start);
+        const canvas = document.createElement("canvas"),
+          ctx = canvas.getContext("2d");
+        if (ctx) {
+          const style = getComputedStyle(input);
+          ctx.font = `${style.fontSize} ${style.fontFamily}`;
+          input.scrollLeft = Math.max(
+            0,
+            ctx.measureText(prefix.replaceAll("\t", "  ")).width -
+              input.clientWidth / 2,
+          );
+        }
       }
-      onSaved();
-      notify("文件已保存");
-    } catch (e) {
-      notify((e as Error).message, true);
-    } finally {
-      savingRef.current = false;
-      setSaving(false);
+      syncScroll();
+    } else {
+      setShowAll(true);
+      requestAnimationFrame(() =>
+        readScroll.current
+          ?.querySelectorAll(".code-line")
+          [line]?.scrollIntoView({ block: "center", inline: "nearest" }),
+      );
     }
   };
-  const codeMatch = (text?: string) =>
-    tab?.kind === "diff" &&
-    search &&
-    text?.toLowerCase().includes(search.toLowerCase())
-      ? " search-match"
-      : "";
+  const closeSearch = () => {
+    setFindOpen(false);
+    setSelection({ matches: [], active: 0 });
+    (textarea.current ?? readScroll.current)?.focus();
+  };
+  const replaceText = (text: string) => {
+    const input = textarea.current;
+    if (!input || text === draft) return;
+    // Insert through the native editor so replace remains one undoable operation.
+    let start = 0,
+      end = draft.length,
+      replacementEnd = text.length;
+    while (
+      start < end &&
+      start < replacementEnd &&
+      draft[start] === text[start]
+    )
+      start++;
+    while (
+      end > start &&
+      replacementEnd > start &&
+      draft[end - 1] === text[replacementEnd - 1]
+    ) {
+      end--;
+      replacementEnd--;
+    }
+    const focused = document.activeElement as HTMLElement | null;
+    input.focus({ preventScroll: true });
+    input.setSelectionRange(start, end);
+    document.execCommand(
+      "insertText",
+      false,
+      text.slice(start, replacementEnd),
+    );
+    autosave.change(text);
+    focused?.focus({ preventScroll: true });
+  };
+  useEffect(() => {
+    const shortcut = (event: KeyboardEvent) => {
+      if (
+        !tab ||
+        !data ||
+        data.binary ||
+        error ||
+        loading ||
+        document.querySelector('[role="dialog"]')
+      )
+        return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target?.closest("input,textarea,[contenteditable=true]") &&
+        !panel.current?.contains(target)
+      )
+        return;
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+      const key = event.key.toLowerCase();
+      if (key === "f" || key === "h") {
+        event.preventDefault();
+        setFindOpen(true);
+        setReplaceOpen(key === "h");
+        setFindFocus((value) => value + 1);
+      } else if (key === "s" && edit) {
+        event.preventDefault();
+        void autosave.flush();
+      }
+    };
+    window.addEventListener("keydown", shortcut);
+    return () => window.removeEventListener("keydown", shortcut);
+  }, [tab?.id, data, error, loading, edit, autosave.flush]);
+  const jump = (direction: number) => {
+    if (edit && textarea.current) {
+      const input = textarea.current,
+        current = draft.slice(0, input.selectionStart).split("\n").length - 1;
+      const lines = changes.flatMap((change, i) =>
+        change.kind || change.deletedBefore || change.deletedAfter ? [i] : [],
+      );
+      const next =
+        direction > 0
+          ? (lines.find((line) => line > current) ?? lines[0])
+          : ([...lines].reverse().find((line) => line < current) ??
+            lines.at(-1));
+      if (next !== undefined) {
+        const start = draftLines
+          .slice(0, next)
+          .reduce((sum, line) => sum + line.length + 1, 0);
+        reveal({
+          matches: [{ start, end: start, replacement: "" }],
+          active: 0,
+        });
+        setSelection({ matches: [], active: 0 });
+        input.focus();
+      }
+    } else {
+      const lines = Array.from(
+        readScroll.current?.querySelectorAll<HTMLElement>(".code-line") ?? [],
+      );
+      const changes = lines.filter(
+        (line) =>
+          line.classList.contains("added") ||
+          line.classList.contains("removed"),
+      );
+      const top = readScroll.current?.getBoundingClientRect().top ?? 0;
+      const next =
+        direction > 0
+          ? (changes.find(
+              (line) => line.getBoundingClientRect().top > top + 24,
+            ) ?? changes[0])
+          : ([...changes]
+              .reverse()
+              .find((line) => line.getBoundingClientRect().top < top - 1) ??
+            changes.at(-1));
+      next?.scrollIntoView({ block: "start", inline: "nearest" });
+    }
+  };
+
   return (
-    <section className="editor-panel panel">
+    <section ref={panel} className="editor-panel panel">
       <div className="editor-tabs">
-        {tabs.map((t) => (
+        {tabs.map((item) => (
           <div
-            className={`editor-tab ${active === t.id ? "active" : ""}`}
-            key={t.id}
+            className={`editor-tab ${active === item.id ? "active" : ""}`}
+            key={item.id}
           >
-            <button title={t.path} onClick={() => onSelect(t.id)}>
-              <FileIcon name={t.path} />
-              <span>{t.path.split("/").at(-1)}</span>
-              {t.id === tab?.id && dirty && (
+            <button title={item.path} onClick={() => onSelect(item.id)}>
+              <FileIcon name={item.path} />
+              <span>{item.path.split("/").at(-1)}</span>
+              {item.id === tab?.id && dirty && (
                 <span
                   className="editor-dirty"
-                  aria-label="未保存的修改"
-                  title="未保存的修改"
+                  aria-label="正在等待自动保存"
+                  title="正在等待自动保存"
                 >
                   ●
                 </span>
               )}
-              {t.kind === "diff" && (
+              {item.kind === "diff" && (
                 <GitCompareArrows size={12} className="muted" />
               )}
-              {t.commit && (
-                <span className="tiny muted">{t.commit.slice(0, 7)}</span>
+              {item.commit && (
+                <span className="tiny muted">{item.commit.slice(0, 7)}</span>
               )}
-              {t.staged && <span className="tiny muted">暂存</span>}
+              {item.staged && <span className="tiny muted">暂存</span>}
             </button>
             <IconButton
-              title={`关闭 ${t.path.split("/").at(-1)}`}
-              onClick={() => onClose(t.id)}
+              title={`关闭 ${item.path.split("/").at(-1)}`}
+              onClick={() => onClose(item.id)}
             >
               <X size={12} />
             </IconButton>
@@ -380,16 +616,23 @@ export function Editor({
       ) : (
         <>
           <div className="editor-toolbar">
-            <span className="truncate editor-path">
-              {tab.path.split("/").map((part, i, arr) => (
-                <span key={i}>
-                  {part}
-                  {i < arr.length - 1 && (
-                    <span className="path-divider"> / </span>
-                  )}
-                </span>
-              ))}
+            <span className="truncate editor-path" title={tab.path}>
+              {tab.path.split("/").join(" / ")}
             </span>
+            {edit && (
+              <span className="editor-save-status muted" role="status">
+                {autosave.error
+                  ? "保存失败"
+                  : saving
+                    ? "正在保存…"
+                    : dirty
+                      ? "等待保存…"
+                      : "已自动保存"}
+              </span>
+            )}
+            {!edit && data && !data.binary && (
+              <span className="editor-save-status muted">只读</span>
+            )}
             {tab.kind === "diff" && (
               <>
                 <IconButton title="上一个差异" onClick={() => jump(-1)}>
@@ -398,23 +641,32 @@ export function Editor({
                 <IconButton title="下一个差异" onClick={() => jump(1)}>
                   <ArrowDown size={14} />
                 </IconButton>
-                <span className="toolbar-divider" />
-                <IconButton
-                  title="并排差异"
-                  active={split}
-                  onClick={() => setSplit(true)}
-                >
-                  <Columns2 size={15} />
-                </IconButton>
-                <IconButton
-                  title="统一差异"
-                  active={!split}
-                  onClick={() => setSplit(false)}
-                >
-                  <Rows3 size={15} />
-                </IconButton>
+                {!edit && (
+                  <label className="checkbox-label editor-whitespace">
+                    <input
+                      type="checkbox"
+                      checked={ignoreWhitespace}
+                      onChange={(event) =>
+                        setIgnoreWhitespace(event.target.checked)
+                      }
+                    />
+                    忽略空白
+                  </label>
+                )}
               </>
             )}
+            <IconButton
+              title="查找（Ctrl+F）"
+              disabled={!data || data.binary || loading}
+              active={findOpen}
+              onClick={() => {
+                setFindOpen(!findOpen);
+                if (findOpen) closeSearch();
+                else setFindFocus((value) => value + 1);
+              }}
+            >
+              <Search size={14} />
+            </IconButton>
             <IconButton
               title="自动换行"
               active={wrap}
@@ -422,26 +674,6 @@ export function Editor({
             >
               <WrapText size={15} />
             </IconButton>
-            {!tab.commit && (
-              <button
-                className={`small editor-mode-button ${edit ? "active" : ""}`}
-                aria-label="编辑工作区文件"
-                aria-pressed={edit}
-                title="编辑工作区文件"
-                disabled={!canEdit || saving}
-                onClick={() => {
-                  focusPending.current = true;
-                  setEdit(true);
-                  if (edit) {
-                    textarea.current?.focus();
-                    focusPending.current = false;
-                  }
-                }}
-              >
-                <Edit3 size={14} />
-                {edit ? "编辑中" : "编辑文件"}
-              </button>
-            )}
             <IconButton
               title="复制文件内容"
               disabled={!data}
@@ -455,6 +687,73 @@ export function Editor({
               <Copy size={14} />
             </IconButton>
           </div>
+          {autosave.error && edit && (
+            <div className="editor-save-error" role="alert">
+              <span>
+                自动保存失败：{autosave.error}
+                。草稿仍保留在当前标签，可先复制内容再重新载入。
+              </span>
+              <button
+                className="small"
+                disabled={saving}
+                onClick={() => void autosave.flush()}
+              >
+                重试
+              </button>
+              <button
+                className="small"
+                disabled={saving}
+                onClick={() =>
+                  confirm(
+                    "重新载入文件",
+                    "将丢弃当前未保存的草稿，并读取磁盘上的最新内容。请先复制需要保留的内容。",
+                    async () => {
+                      try {
+                        const file = await request<{
+                          text: string;
+                          binary: boolean;
+                          truncated: boolean;
+                        }>("file", repo, { path: tab.path });
+                        setData((current) =>
+                          current
+                            ? {
+                                ...current,
+                                after: file.text,
+                                binary: file.binary,
+                                truncated: file.truncated,
+                              }
+                            : current,
+                        );
+                        autosave.load(
+                          repo,
+                          tab.path,
+                          file.text,
+                          !file.binary && !file.truncated,
+                        );
+                      } catch (cause) {
+                        notify((cause as Error).message, true);
+                      }
+                    },
+                  )
+                }
+              >
+                重新载入
+              </button>
+            </div>
+          )}
+          {findOpen && data && !data.binary && !loading && !error && (
+            <EditorSearch
+              key={`${repo}:${tab.id}`}
+              text={visibleText}
+              writable={edit}
+              expanded={replaceOpen}
+              focusVersion={findFocus}
+              onExpand={setReplaceOpen}
+              onClose={closeSearch}
+              onSelect={reveal}
+              onChange={replaceText}
+            />
+          )}
           {loading ? (
             <div className="editor-loading">
               <Spinner />
@@ -470,38 +769,6 @@ export function Editor({
             </Empty>
           ) : edit ? (
             <div className="edit-area">
-              <div className="edit-banner">
-                <span>
-                  编辑工作区 · {tab.path}
-                  {dirty ? " · 未保存" : " · 已保存"}
-                </span>
-                <button
-                  className="primary small"
-                  aria-label="保存文件"
-                  aria-keyshortcuts="Control+S Meta+S"
-                  disabled={saving || !dirty}
-                  onClick={save}
-                >
-                  {saving ? <Spinner /> : <Save size={13} />}保存文件{" "}
-                  <kbd>Ctrl S</kbd>
-                </button>
-                <button
-                  className="small"
-                  disabled={saving || !dirty}
-                  onClick={() => {
-                    setDraft(normalizeLines(data?.after || ""));
-                  }}
-                >
-                  放弃修改
-                </button>
-                <button
-                  className="small"
-                  disabled={saving || dirty}
-                  onClick={() => setEdit(false)}
-                >
-                  阅读模式
-                </button>
-              </div>
               <div className={`edit-body ${wrap ? "wrap-code" : ""}`}>
                 <div
                   ref={gutter}
@@ -530,32 +797,43 @@ export function Editor({
                     ))}
                   </div>
                 )}
-                <textarea
-                  ref={textarea}
-                  aria-label="文件内容"
-                  aria-busy={saving}
-                  readOnly={saving}
-                  wrap={wrap ? "soft" : "off"}
-                  spellCheck={false}
-                  value={draft}
-                  onScroll={(event) => {
-                    if (gutter.current)
-                      gutter.current.scrollTop = event.currentTarget.scrollTop;
-                  }}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if ((e.ctrlKey || e.metaKey) && e.key === "s") {
-                      e.preventDefault();
-                      void save();
-                    }
-                  }}
-                />
+                <div className="edit-code-surface">
+                  <div className="edit-highlight" aria-hidden="true">
+                    <div ref={code} className="edit-highlight-lines">
+                      {draftLines.map((line, i) => (
+                        <div key={i}>
+                          <MarkedCode text={line} ranges={searchRanges[i]} />
+                          {!line && "\u200b"}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <textarea
+                    ref={textarea}
+                    aria-label="文件内容"
+                    aria-description="修改后自动保存；Ctrl+F 查找，Ctrl+H 替换"
+                    wrap={wrap ? "soft" : "off"}
+                    spellCheck={false}
+                    value={draft}
+                    onScroll={syncScroll}
+                    onBlur={() => void autosave.flush()}
+                    onCompositionStart={() => {
+                      autosave.composing.current = true;
+                    }}
+                    onCompositionEnd={(event) => {
+                      autosave.composing.current = false;
+                      autosave.change(event.currentTarget.value);
+                      void autosave.flush();
+                    }}
+                    onChange={(event) => autosave.change(event.target.value)}
+                  />
+                </div>
               </div>
             </div>
           ) : (
             <>
               {tab.kind === "diff" && (
-                <div className={`diff-labels ${split ? "split" : ""}`}>
+                <div className="diff-labels">
                   <span>
                     <span className="diff-dot old" />
                     {data?.beforeLabel}
@@ -568,129 +846,70 @@ export function Editor({
                   </span>
                 </div>
               )}
-              <div className={`code-scroll ${wrap ? "wrap-code" : ""}`}>
+              <div
+                ref={readScroll}
+                tabIndex={0}
+                aria-label="只读文件内容"
+                className={`code-scroll ${wrap ? "wrap-code" : ""}`}
+              >
                 {data?.truncated && (
                   <div className="inline-warning">
                     文件超过 2 MB，内容已限制。请使用外部编辑器处理完整文件。
                   </div>
                 )}
-                {tab.kind === "file" ? (
-                  <div className="code-document">
-                    {fileLines
+                {displayLines.length ? (
+                  <div
+                    className={
+                      tab.kind === "diff"
+                        ? "diff-content unified"
+                        : "code-document"
+                    }
+                  >
+                    {displayLines
                       .slice(0, showAll ? undefined : 3000)
                       .map((line, i) => (
-                        <div key={i} className={`code-line${codeMatch(line)}`}>
+                        <div key={i} className={`code-line ${line.kind}`}>
+                          {tab.kind === "diff" && (
+                            <span className="line-number">
+                              {line.oldNumber}
+                            </span>
+                          )}
                           <span className="line-number">
-                            {i + 1}
-                            <LineMarker change={changes[i]} />
+                            {line.newNumber}
+                            {tab.kind === "file" && (
+                              <LineMarker change={changes[i]} />
+                            )}
                           </span>
+                          {tab.kind === "diff" && (
+                            <span className="diff-sign">
+                              {line.kind === "added"
+                                ? "+"
+                                : line.kind === "removed"
+                                  ? "−"
+                                  : " "}
+                            </span>
+                          )}
                           <code>
-                            <Highlight text={line} />
+                            <MarkedCode
+                              text={line.text}
+                              ranges={searchRanges[i]}
+                            />
                           </code>
                         </div>
                       ))}
                   </div>
-                ) : rows.length ? (
-                  <div
-                    className={`diff-content ${split ? "split" : "unified"}`}
-                  >
-                    {rows.slice(0, showAll ? undefined : 3000).map((row, i) =>
-                      split ? (
-                        <div className={`diff-row ${row.kind}`} key={i}>
-                          <div
-                            className={`code-line old-side ${row.kind !== "same" && row.before !== undefined ? "removed" : ""}${codeMatch(row.before)}`}
-                          >
-                            <span className="line-number">{row.oldNumber}</span>
-                            <code>
-                              <Highlight text={row.before ?? ""} />
-                            </code>
-                          </div>
-                          <div
-                            className={`code-line new-side ${row.kind !== "same" && row.after !== undefined ? "added" : ""}${codeMatch(row.after)}`}
-                          >
-                            <span className="line-number">{row.newNumber}</span>
-                            <code>
-                              <Highlight text={row.after ?? ""} />
-                            </code>
-                          </div>
-                        </div>
-                      ) : (
-                        <div key={i}>
-                          {row.kind !== "same" && row.before !== undefined && (
-                            <div
-                              className={`code-line removed${codeMatch(row.before)}`}
-                            >
-                              <span className="line-number">
-                                {row.oldNumber}
-                              </span>
-                              <span className="line-number" />
-                              <span className="diff-sign">−</span>
-                              <code>
-                                <Highlight text={row.before} />
-                              </code>
-                            </div>
-                          )}
-                          {row.after !== undefined && (
-                            <div
-                              className={`code-line ${row.kind !== "same" ? "added" : ""}${codeMatch(row.after)}`}
-                            >
-                              <span className="line-number">
-                                {row.kind === "same" ? row.oldNumber : ""}
-                              </span>
-                              <span className="line-number">
-                                {row.newNumber}
-                              </span>
-                              <span className="diff-sign">
-                                {row.kind === "same" ? " " : "+"}
-                              </span>
-                              <code>
-                                <Highlight text={row.after} />
-                              </code>
-                            </div>
-                          )}
-                        </div>
-                      ),
-                    )}
-                  </div>
                 ) : (
                   <Empty icon={<Check size={26} />} title="内容相同" />
                 )}
-                {!showAll &&
-                  (rows.length > 3000 ||
-                    (tab.kind === "file" && fileLines.length > 3000)) && (
-                    <button
-                      className="load-more"
-                      onClick={() => setShowAll(true)}
-                    >
-                      显示全部行
-                    </button>
-                  )}
+                {!showAll && displayLines.length > 3000 && (
+                  <button
+                    className="load-more"
+                    onClick={() => setShowAll(true)}
+                  >
+                    显示全部行
+                  </button>
+                )}
               </div>
-              {tab.kind === "diff" && (
-                <div className="editor-footer">
-                  <div className="editor-search input-shell">
-                    <Search size={12} />
-                    <input
-                      aria-label="在文件中查找"
-                      placeholder="在文件中查找…"
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                    />
-                  </div>
-                  <label className="checkbox-label">
-                    <input
-                      type="checkbox"
-                      checked={ignoreWhitespace}
-                      onChange={(e) => setIgnoreWhitespace(e.target.checked)}
-                    />
-                    忽略空白
-                  </label>
-                  <span className="muted">{matches.length} 处改动</span>
-                  <span className="spacer" />
-                  <span>UTF-8</span>
-                  <span>{data?.after.includes("\r\n") ? "CRLF" : "LF"}</span>
-                </div>
-              )}
             </>
           )}
         </>

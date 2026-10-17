@@ -893,9 +893,6 @@ hr {
   flex: 1;
   height: 100%;
 }
-.diff-labels.split > span:first-child {
-  border-right: 1px solid var(--border);
-}
 .diff-labels small {
   margin-left: auto;
   font-size: 10px;
@@ -954,20 +951,6 @@ hr {
   min-width: 100%;
   padding: 4px 0 25px;
 }
-.diff-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  min-height: 22px;
-}
-.diff-row > .code-line:first-child {
-  border-right: 1px solid var(--border);
-}
-.diff-row .code-line {
-  overflow: hidden;
-}
-.diff-row .code-line code {
-  overflow: visible;
-}
 .code-line.removed {
   background: var(--removed);
 }
@@ -996,10 +979,6 @@ hr {
 .wrap-code .diff-content {
   width: 100%;
 }
-.search-match {
-  box-shadow: inset 0 0 0 1px #a68a3f;
-  background: color-mix(in srgb, var(--gold) 13%, transparent) !important;
-}
 .syntax-string {
   color: var(--syntax-string);
 }
@@ -1011,32 +990,6 @@ hr {
 }
 .syntax-comment {
   color: var(--syntax-comment);
-}
-.editor-footer {
-  min-height: 29px;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px 9px;
-  padding: 3px 9px;
-  border-top: 1px solid var(--subtle-border);
-  font-size: 10px;
-  color: var(--muted);
-  flex-shrink: 0;
-}
-.editor-footer input:not([type="checkbox"]) {
-  border: 0;
-  padding: 2px 0;
-  width: 135px;
-  background: transparent;
-  font-size: 11px;
-}
-.editor-footer .checkbox-label {
-  font-size: 10px;
-}
-.editor-footer input[type="checkbox"] {
-  width: 11px;
-  height: 11px;
 }
 .editor-loading,
 .inline-loading {
@@ -1053,33 +1006,6 @@ hr {
   display: flex;
   flex-direction: column;
   min-height: 0;
-}
-.edit-banner {
-  display: flex;
-  align-items: center;
-  padding: 7px 10px;
-  gap: 8px;
-  border-bottom: 1px solid var(--border);
-  font-size: 11px;
-  flex-wrap: wrap;
-}
-.edit-banner > span {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 120px;
-}
-.edit-banner kbd {
-  font: inherit;
-  opacity: 0.75;
-}
-.editor-mode-button {
-  flex-shrink: 0;
-}
-.editor-mode-button.active {
-  color: var(--blue);
-  background: var(--selection);
 }
 .editor-dirty {
   color: var(--gold);
@@ -2774,9 +2700,6 @@ hr {
 .welcome-actions button > span {
   text-align: left;
 }
-.diff-content.split {
-  min-width: 800px;
-}
 .remote-list {
   padding: 8px 20px;
 }
@@ -2855,17 +2778,6 @@ select {
 }
 .switcher-search.input-shell > input {
   padding-block: 8px;
-}
-.editor-search.input-shell {
-  width: 170px;
-  max-width: 100%;
-  height: 23px;
-}
-.editor-search.input-shell > input {
-  height: 19px;
-  min-height: 0;
-  padding: 1px 0;
-  line-height: 17px;
 }
 .advanced-filters > .input-shell {
   min-height: 28px;
@@ -3298,5 +3210,176 @@ button.primary {
     .welcome-actions > button
   ):active {
     scale: 1 !important;
+  }
+}
+
+/* Editing stays flush with the document; keyboard focus is shown in the gutter. */
+.edit-code-surface {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.edit-area .edit-code-surface textarea {
+  display: block;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  resize: none;
+  background: transparent;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: var(--text);
+  outline: none;
+  box-shadow: none;
+}
+.edit-code-surface textarea::selection {
+  background: color-mix(in srgb, var(--blue) 26%, transparent);
+  color: transparent;
+}
+.edit-body:has(textarea:focus-visible) .edit-line-numbers {
+  border-right-color: var(--faint);
+}
+.edit-highlight {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.edit-highlight-lines {
+  min-width: 100%;
+  width: max-content;
+  padding: 8px 12px;
+  font-family: var(--code-font);
+  font-size: var(--editor-font-size, 13px);
+  line-height: 22px;
+  white-space: pre;
+  tab-size: 2;
+  color: var(--text);
+}
+.edit-highlight-lines > div {
+  min-height: 22px;
+}
+.wrap-code .edit-highlight-lines {
+  min-width: 0;
+  width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.editor-panel mark {
+  color: inherit;
+  background: color-mix(in srgb, var(--gold) 27%, transparent);
+  border-radius: 2px;
+}
+.editor-panel mark.active-match {
+  background: color-mix(in srgb, var(--gold) 43%, transparent);
+  box-shadow: inset 0 0 0 1px var(--gold);
+}
+.editor-save-status {
+  font-size: 10px;
+  white-space: nowrap;
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+.editor-whitespace {
+  white-space: nowrap;
+  font-size: 10px;
+  margin: 0 5px;
+}
+.editor-save-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--subtle-border);
+  color: var(--red);
+  font-size: 11px;
+}
+.editor-save-error > span {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.editor-save-error button {
+  flex-shrink: 0;
+}
+.editor-find {
+  container-type: inline-size;
+  padding: 8px 10px;
+  flex-shrink: 0;
+  background: var(--surface);
+  border-bottom: 1px solid var(--subtle-border);
+}
+.editor-find-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.editor-find-row + .editor-find-row {
+  margin-top: 7px;
+}
+.editor-find-input.input-shell {
+  flex: 0 1 420px;
+  min-width: 140px;
+  padding: 0 7px;
+  gap: 5px;
+  border-radius: 6px;
+}
+.editor-find-input.input-shell > input {
+  height: 29px;
+  min-height: 29px;
+}
+.editor-find .icon-button {
+  flex-shrink: 0;
+  width: 25px;
+  height: 25px;
+  font-size: 12px;
+}
+.editor-find-input .icon-button {
+  width: 24px;
+  height: 23px;
+}
+.editor-find-count {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  min-width: 65px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.editor-replace-row {
+  padding-left: 30px;
+}
+.editor-replace-row > button {
+  white-space: nowrap;
+}
+.editor-find-error {
+  font-size: 11px;
+  margin: 6px 0 0 30px;
+  overflow-wrap: anywhere;
+}
+@container (max-width: 520px) {
+  .editor-find-row {
+    flex-wrap: wrap;
+  }
+  .editor-find-input.input-shell {
+    flex: 1 1 calc(100% - 35px);
+  }
+  .editor-find-count {
+    margin-left: 30px;
+  }
+  .editor-replace-row .editor-find-input {
+    flex-basis: 100%;
+  }
+}
+@media (forced-colors: active) {
+  .edit-area .edit-code-surface textarea {
+    color: CanvasText;
+    -webkit-text-fill-color: CanvasText;
+    caret-color: CanvasText;
+  }
+  .edit-highlight {
+    display: none;
   }
 }
