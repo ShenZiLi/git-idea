@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -11,11 +11,61 @@ import { request } from "../api";
 import type { Change, TreeEntry } from "../../shared/types";
 import { Empty, FileIcon, IconButton, PanelHeader } from "./ui";
 
+type TreeStatus = "untracked" | "added" | "modified" | "conflicted" | "ignored";
+
+const treeStatusDetails: Record<TreeStatus, { label: string; badge: string }> =
+  {
+    untracked: { label: "未被 Git 托管", badge: "U" },
+    added: { label: "新增，已加入 Git", badge: "A" },
+    modified: { label: "已修改", badge: "M" },
+    conflicted: { label: "存在冲突", badge: "!" },
+    ignored: { label: "Git 已排除", badge: "I" },
+  };
+
+function collectTreeStatuses(changes: Change[]) {
+  const statuses = new Map<string, TreeStatus>();
+  const priority: Record<TreeStatus, number> = {
+    ignored: 0,
+    untracked: 1,
+    added: 2,
+    modified: 3,
+    conflicted: 4,
+  };
+  const record = (path: string, status: TreeStatus) => {
+    const previous = statuses.get(path);
+    if (!previous || priority[status] > priority[previous]) {
+      statuses.set(path, status);
+    }
+  };
+  const recordPath = (path: string, status: TreeStatus) => {
+    record(path, status);
+    let separator = path.lastIndexOf("/");
+    while (separator > 0) {
+      record(path.slice(0, separator), status);
+      separator = path.lastIndexOf("/", separator - 1);
+    }
+  };
+  for (const change of changes) {
+    const status: TreeStatus = change.conflict
+      ? "conflicted"
+      : change.index === "?"
+        ? "untracked"
+        : /[AC]/.test(change.index)
+          ? "added"
+          : "modified";
+    recordPath(change.path, status);
+    if (change.oldPath && /R/.test(change.index + change.worktree)) {
+      recordPath(change.oldPath, "modified");
+    }
+  }
+  return statuses;
+}
+
 function Directory({
   repo,
   directory = "",
   depth = 0,
-  changes,
+  statuses,
   onFile,
   active,
   version,
@@ -25,7 +75,7 @@ function Directory({
   repo: string;
   directory?: string;
   depth?: number;
-  changes: Change[];
+  statuses: Map<string, TreeStatus>;
   onFile: (path: string) => void;
   active?: string;
   version: number;
@@ -53,13 +103,19 @@ function Directory({
       {error && <div className="tree-error">{error}</div>}
       {entries.map((entry) => {
         const open = expanded.has(entry.path),
-          change = changes.find((c) => c.path === entry.path);
+          status = entry.ignored ? "ignored" : statuses.get(entry.path),
+          details = status ? treeStatusDetails[status] : undefined,
+          statusLabel = details
+            ? `${entry.directory && status !== "ignored" ? "包含：" : ""}${details.label}`
+            : "";
         return (
           <div key={entry.path}>
             <button
-              title={`${entry.path}${entry.ignored ? "（Git 已忽略）" : ""}`}
-              className={`tree-row ${active === entry.path ? "selected" : ""} ${entry.ignored ? "ignored" : change ? (change.conflict ? "conflicted" : change.index === "?" ? "untracked" : "modified") : ""}`}
+              title={`${entry.path}${statusLabel ? `（${statusLabel}）` : ""}`}
+              className={`tree-row ${active === entry.path ? "selected" : ""}`}
+              data-status={status}
               data-ignored={entry.ignored || undefined}
+              aria-label={`${entry.name}${statusLabel ? `，${statusLabel}` : ""}`}
               aria-expanded={entry.directory ? open : undefined}
               style={{ paddingLeft: 12 + depth * 17 }}
               onClick={() =>
@@ -85,9 +141,13 @@ function Directory({
               />
               <span className="truncate">{entry.name}</span>
               {entry.symlink && <span className="muted">↗</span>}
-              {change && (
-                <span className="file-status">
-                  {change.conflict ? "!" : change.index === "?" ? "U" : "M"}
+              {details && (
+                <span
+                  className="file-status"
+                  title={statusLabel}
+                  aria-hidden="true"
+                >
+                  {details.badge}
                 </span>
               )}
             </button>
@@ -95,7 +155,7 @@ function Directory({
               <Directory
                 {...{
                   repo,
-                  changes,
+                  statuses,
                   onFile,
                   active,
                   version,
@@ -131,6 +191,7 @@ export function ProjectTree({
 }) {
   const [expanded, setExpanded] = useState(new Set<string>()),
     [rootOpen, setRootOpen] = useState(true);
+  const statuses = useMemo(() => collectTreeStatuses(changes), [changes]);
   useEffect(() => {
     setExpanded(new Set());
     setRootOpen(true);
@@ -179,7 +240,7 @@ export function ProjectTree({
             <Directory
               {...{
                 repo,
-                changes,
+                statuses,
                 onFile,
                 active,
                 version,

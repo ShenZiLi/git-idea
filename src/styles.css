@@ -640,10 +640,26 @@ hr {
 .tree-row.selected {
   background: var(--selection);
 }
-.tree-row.ignored,
-.tree-row.ignored svg,
-.tree-row.ignored .file-status {
+.tree-row[data-status="untracked"],
+.tree-row[data-status="conflicted"] {
+  color: var(--red);
+}
+.tree-row[data-status="added"] {
+  color: var(--green);
+}
+.tree-row[data-status="modified"] {
+  color: var(--blue);
+}
+.tree-row[data-status="ignored"] {
   color: var(--faint);
+}
+.tree-row[data-status] svg,
+.tree-row[data-status] .muted,
+.tree-row[data-status] .file-status {
+  color: inherit;
+}
+.tree-row[data-status] .folder-icon {
+  fill: color-mix(in srgb, currentColor 13%, transparent);
 }
 .tree-spacer {
   width: 13px;
