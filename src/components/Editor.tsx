@@ -406,6 +406,8 @@ export function Editor({
                 </span>
                 <button
                   className="primary small"
+                  aria-label="保存文件"
+                  aria-keyshortcuts="Control+S Meta+S"
                   disabled={saving || !dirty}
                   onClick={save}
                 >

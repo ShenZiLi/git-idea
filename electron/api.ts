@@ -66,6 +66,12 @@ export function createApi(
         ...(typeof p.fontSize === "number"
           ? { fontSize: Math.max(11, Math.min(18, p.fontSize)) }
           : {}),
+        ...(typeof p.uiFontFamily === "string"
+          ? { uiFontFamily: p.uiFontFamily.trim() }
+          : {}),
+        ...(typeof p.editorFontFamily === "string"
+          ? { editorFontFamily: p.editorFontFamily.trim() }
+          : {}),
       });
     if (request.method === "logs") return commandLogs();
     if (request.method === "open")
