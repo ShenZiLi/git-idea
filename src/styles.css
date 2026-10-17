@@ -183,7 +183,7 @@ button svg {
   flex-shrink: 0;
   stroke-width: 1.5;
 }
-input:not([type="checkbox"]),
+input:where(:not([type="checkbox"]):not([type="radio"])),
 textarea,
 select {
   background: var(--surface);
@@ -1011,11 +1011,12 @@ hr {
   color: var(--syntax-comment);
 }
 .editor-footer {
-  height: 27px;
+  min-height: 29px;
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 0 9px;
+  flex-wrap: wrap;
+  gap: 6px 9px;
+  padding: 3px 9px;
   border-top: 1px solid var(--subtle-border);
   font-size: 10px;
   color: var(--muted);
@@ -1801,6 +1802,8 @@ hr {
   gap: 7px;
   padding: 3px 8px;
   border-bottom: 1px solid var(--subtle-border);
+  flex-wrap: wrap;
+  flex-shrink: 0;
 }
 .log-search {
   display: flex;
@@ -1825,7 +1828,10 @@ hr {
 .log-search button {
   background: none;
   border: 0;
-  padding: 1px;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
 }
 .filter-select {
   display: flex;
@@ -1857,24 +1863,27 @@ hr {
   padding: 6px 8px;
   border-bottom: 1px solid var(--border);
   font-size: 11px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
 }
 .advanced-filters label {
   display: flex;
   align-items: center;
   gap: 5px;
   min-width: 0;
-  width: 25%;
+  flex: 1 1 140px;
 }
 .advanced-filters input {
   padding: 4px 5px;
-  width: 30%;
+  flex: 1 1 130px;
+  width: 0;
 }
 .advanced-filters label input {
   width: 100%;
 }
 .advanced-filters input[type="date"] {
   width: 130px;
-  color-scheme: dark;
+  color-scheme: inherit;
 }
 .log-columns,
 .log-row {
@@ -2824,10 +2833,82 @@ hr {
   background: var(--ambient-background);
 }
 button,
-input:not([type="checkbox"]),
+input:where(:not([type="checkbox"]):not([type="radio"])),
 textarea,
 select {
   border-radius: 8px;
+}
+/* Composite controls own one frame and one focus indicator, including icons. */
+.input-shell {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+  padding: 0 8px;
+  border: 1px solid var(--control-border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--muted);
+}
+.input-shell > svg {
+  flex-shrink: 0;
+  pointer-events: none;
+}
+.input-shell > :is(input, select) {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  min-height: 24px;
+  padding: 4px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  line-height: 1.5;
+}
+.input-shell:has(> :is(input, select):focus-visible) {
+  border-color: var(--focus-ring);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -1px;
+}
+.input-shell > :is(input, select):focus-visible {
+  outline: none;
+}
+.filter-select.input-shell {
+  height: 27px;
+  flex: 0 1 180px;
+}
+.filter-select.input-shell > select {
+  max-width: none;
+}
+.switcher-search.input-shell > input {
+  padding-block: 8px;
+}
+.editor-search.input-shell {
+  width: 170px;
+  max-width: 100%;
+  height: 23px;
+}
+.editor-search.input-shell > input {
+  height: 19px;
+  min-height: 0;
+  padding: 1px 0;
+  line-height: 17px;
+}
+.advanced-filters > .input-shell {
+  min-height: 28px;
+}
+.change-file:focus-visible {
+  outline-offset: 2px;
+}
+@media (forced-colors: active) {
+  .input-shell {
+    border-color: ButtonText;
+  }
+  .input-shell:has(> :is(input, select):focus-visible) {
+    border-color: Highlight;
+    outline-color: Highlight;
+  }
 }
 button.primary {
   box-shadow:

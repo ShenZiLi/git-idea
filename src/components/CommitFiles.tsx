@@ -205,7 +205,7 @@ export function UntrackedBrowser({
   return (
     <Modal title="未进行版本管理的文件" onClose={onClose} wide>
       <div className="untracked-browser">
-        <label className="commit-file-search">
+        <label className="commit-file-search input-shell">
           <Search size={15} />
           <input
             aria-label="筛选未托管文件"

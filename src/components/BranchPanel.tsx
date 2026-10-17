@@ -80,7 +80,7 @@ export function BranchPanel({
   );
   return (
     <aside className="branches-panel">
-      <div className="branch-search">
+      <div className="branch-search input-shell">
         <Search size={14} />
         <input
           aria-label="搜索分支或标签"

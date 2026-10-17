@@ -695,13 +695,15 @@ export function Editor({
                   )}
               </div>
               <div className="editor-footer">
-                <Search size={12} />
-                <input
-                  aria-label="在文件中查找"
-                  placeholder="在文件中查找…"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
+                <div className="editor-search input-shell">
+                  <Search size={12} />
+                  <input
+                    aria-label="在文件中查找"
+                    placeholder="在文件中查找…"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+                </div>
                 {tab.kind === "diff" && (
                   <>
                     <label className="checkbox-label">

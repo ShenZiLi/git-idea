@@ -207,7 +207,9 @@ function PopoverSurface({
   useLayoutEffect(() => {
     if (!present) return;
     const previous = document.activeElement as HTMLElement | null;
-    ref.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+    ref.current
+      ?.querySelector<HTMLButtonElement>("button:not(:disabled)")
+      ?.focus();
     const handler = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -529,7 +531,7 @@ export function BranchSwitcher({
   const [search, setSearch] = useState("");
   return (
     <Modal title="Git 分支" onClose={onClose}>
-      <div className="switcher-search">
+      <div className="switcher-search input-shell">
         <Search size={15} />
         <input
           aria-label="查找分支"

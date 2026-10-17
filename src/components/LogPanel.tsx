@@ -249,7 +249,7 @@ export function LogTable({
   return (
     <section className="log-table-panel">
       <div className="log-toolbar">
-        <div className="log-search">
+        <div className="log-search input-shell">
           <Search size={14} />
           <input
             aria-label="搜索提交"
@@ -266,7 +266,7 @@ export function LogTable({
             </button>
           )}
         </div>
-        <div className="filter-select">
+        <div className="filter-select input-shell">
           <GitPullRequestArrow size={13} />
           <select
             aria-label="筛选分支"
@@ -302,7 +302,7 @@ export function LogTable({
       </div>
       {advanced && (
         <div className="advanced-filters">
-          <label>
+          <label className="input-shell">
             <UserRound size={12} />
             <input
               aria-label="筛选作者"
