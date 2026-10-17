@@ -1212,23 +1212,6 @@ export default function App() {
           >
             <SidebarIcon name="changes" />
           </IconButton>
-          <IconButton
-            title="通知"
-            active={!!toast}
-            onClick={() => notify(status)}
-          >
-            <SidebarIcon name="notification" />
-          </IconButton>
-          <IconButton
-            title="储藏记录"
-            active={logVisible && bottomTab === "stash"}
-            onClick={() => {
-              setLogVisible(true);
-              setBottomTab("stash");
-            }}
-          >
-            <SidebarIcon name="stash" />
-          </IconButton>
           <span className="rail-spacer" />
           <IconButton
             title="切换深浅主题"
