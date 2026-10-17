@@ -342,7 +342,7 @@ hr {
   flex-direction: column;
   height: 100%;
   width: 100%;
-  min-width: 600px;
+  min-width: 0;
   user-select: none;
 }
 .titlebar {
@@ -2345,9 +2345,6 @@ hr {
   }
 }
 @media (max-width: 800px) {
-  .app {
-    min-width: 600px;
-  }
   .upper-grid,
   .hide-project .upper-grid {
     grid-template-columns: minmax(0, 1fr) 4px 260px;
@@ -2404,6 +2401,18 @@ hr {
   .window-actions {
     gap: 0;
     margin-left: 3px;
+  }
+}
+@media (max-width: 600px) {
+  .app-logo,
+  .top-git-actions {
+    display: none;
+  }
+  .project-selector strong {
+    max-width: 64px;
+  }
+  .branch-selector {
+    max-width: 90px;
   }
 }
 @media (prefers-reduced-motion: reduce) {

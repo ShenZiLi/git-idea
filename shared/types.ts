@@ -92,10 +92,19 @@ export interface CommandLog {
   success: boolean;
   duration: number;
 }
+export const UI_SCALE_OPTIONS = [70, 80, 90, 100, 110, 125, 150, 175, 200];
+
+export function normalizeUiScale(value: unknown): number {
+  return typeof value === "number" && UI_SCALE_OPTIONS.includes(value)
+    ? value
+    : 100;
+}
+
 export interface Preferences {
   recent: string[];
   lastRepo?: string;
   theme?: string;
+  uiScale?: number;
   fontSize?: number;
   uiFontFamily?: string;
   editorFontFamily?: string;

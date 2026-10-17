@@ -46,6 +46,7 @@ import type {
   CommitDetail,
   RepoSnapshot,
 } from "../shared/types";
+import { normalizeUiScale, UI_SCALE_OPTIONS } from "../shared/types";
 import { request } from "./api";
 import { ProjectTree } from "./components/ProjectTree";
 import { CommitPanel } from "./components/CommitPanel";
@@ -115,6 +116,7 @@ export default function App() {
     [editorDirty, setEditorDirty] = useState(false);
   const [toast, setToast] = useState<NotificationMessage | null>(null),
     [theme, setTheme] = useState("dark"),
+    [uiScale, setUiScale] = useState(100),
     [fontSize, setFontSize] = useState(13),
     [uiFontFamily, setUiFontFamily] = useState(""),
     [editorFontFamily, setEditorFontFamily] = useState(""),
@@ -196,6 +198,7 @@ export default function App() {
       .then(async (boot) => {
         setRecent(boot.preferences.recent);
         setTheme(boot.preferences.theme || "dark");
+        setUiScale(normalizeUiScale(boot.preferences.uiScale));
         setFontSize(boot.preferences.fontSize || 13);
         setUiFontFamily(boot.preferences.uiFontFamily || "");
         setEditorFontFamily(boot.preferences.editorFontFamily || "");
@@ -504,6 +507,16 @@ export default function App() {
           ],
           hint: "液态玻璃外观 · 保存后应用，下次启动时保留。",
         },
+        {
+          key: "uiScale",
+          label: "界面缩放",
+          value: String(uiScale),
+          options: UI_SCALE_OPTIONS.map((percent) => ({
+            value: String(percent),
+            label: `${percent}%`,
+          })),
+          hint: "统一调整文字、图标和所有面板的大小；100% 为默认大小，保存后应用。",
+        },
         ...(snapshot
           ? [
               {
@@ -566,11 +579,13 @@ export default function App() {
           return false;
         await request("preferences", undefined, {
           theme: values.theme,
+          uiScale: Number(values.uiScale),
           fontSize: Number(values.fontSize),
           uiFontFamily: values.uiFontFamily.trim(),
           editorFontFamily: values.editorFontFamily.trim(),
         });
         setTheme(values.theme);
+        setUiScale(normalizeUiScale(Number(values.uiScale)));
         setFontSize(Number(values.fontSize));
         setUiFontFamily(values.uiFontFamily.trim());
         setEditorFontFamily(values.editorFontFamily.trim());

@@ -15,6 +15,7 @@ import {
   tree,
 } from "./git.ts";
 import type { ApiRequest, Preferences } from "../shared/types.ts";
+import { normalizeUiScale } from "../shared/types.ts";
 
 export function createApi(
   options: { preferencesPath?: string; defaultRepo?: string } = {},
@@ -63,6 +64,9 @@ export function createApi(
     if (request.method === "preferences")
       return save({
         ...(typeof p.theme === "string" ? { theme: p.theme } : {}),
+        ...(typeof p.uiScale === "number"
+          ? { uiScale: normalizeUiScale(p.uiScale) }
+          : {}),
         ...(typeof p.fontSize === "number"
           ? { fontSize: Math.max(11, Math.min(18, p.fontSize)) }
           : {}),

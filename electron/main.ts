@@ -12,6 +12,8 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { createApi } from "./api";
+import { normalizeUiScale } from "../shared/types";
+import type { Bootstrap, Preferences } from "../shared/types";
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -55,7 +57,12 @@ app.whenReady().then(async () => {
   };
   ipcMain.handle("git:request", async (event, request) => {
     trusted(event);
-    return api(request);
+    const result = await api(request);
+    if (request.method === "preferences")
+      window?.webContents.setZoomFactor(
+        normalizeUiScale((result as Preferences).uiScale) / 100,
+      );
+    return result;
   });
   ipcMain.handle("git:choose-directory", async (event) => {
     trusted(event);
@@ -76,6 +83,7 @@ app.whenReady().then(async () => {
     (_webContents, _permission, callback) => callback(false),
   );
   const createWindow = async () => {
+    const { preferences } = (await api({ method: "bootstrap" })) as Bootstrap;
     window = new BrowserWindow({
       width: 1600,
       height: 1000,
@@ -86,6 +94,7 @@ app.whenReady().then(async () => {
       title: "Git IDEA",
       icon: path.join(__dirname, "../dist/icon.png"),
       webPreferences: {
+        zoomFactor: normalizeUiScale(preferences.uiScale) / 100,
         preload: path.join(__dirname, "preload.cjs"),
         contextIsolation: true,
         nodeIntegration: false,
