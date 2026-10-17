@@ -98,6 +98,8 @@ export default function App() {
     [bottomTab, setBottomTab] = useState("log");
   const [projectVisible, setProjectVisible] = useState(true),
     [logVisible, setLogVisible] = useState(true);
+  const [logError, setLogError] = useState(""),
+    [logDetails, setLogDetails] = useState(true);
   const [form, setForm] = useState<FormSpec | null>(null),
     [confirmation, setConfirmation] = useState<ConfirmSpec | null>(null),
     [switcher, setSwitcher] = useState(false),
@@ -142,13 +144,18 @@ export default function App() {
     async (target = repoRef.current, values = filters, files = true) => {
       if (!target) return;
       const id = ++refreshSequence.current;
+      const query = JSON.stringify(values);
+      const current = () =>
+        id === refreshSequence.current &&
+        target === repoRef.current &&
+        query === JSON.stringify(filtersRef.current);
       setLoading(true);
       try {
         const next = await request<RepoSnapshot>("snapshot", target, {
           ...values,
         });
-        if (id !== refreshSequence.current || target !== repoRef.current)
-          return;
+        if (!current()) return;
+        setLogError("");
         setSnapshot(next);
         setSelectedCommit((current) =>
           next.commits.some((c) => c.hash === current)
@@ -156,9 +163,13 @@ export default function App() {
             : next.commits[0]?.hash || "",
         );
         if (files) setVersion((v) => v + 1);
-        setLogs(await request<CommandLog[]>("logs"));
+        const commands = await request<CommandLog[]>("logs");
+        if (current()) setLogs(commands);
       } catch (e) {
-        if (id === refreshSequence.current) notify((e as Error).message, true);
+        if (current()) {
+          setLogError((e as Error).message);
+          notify((e as Error).message, true);
+        }
       } finally {
         if (id === refreshSequence.current) setLoading(false);
       }
@@ -180,6 +191,7 @@ export default function App() {
       setSelectedCommit("");
       setDetail(null);
       setSnapshot(null);
+      setLogError("");
       setFilters(initialFilters);
       setRecent((r) => [root, ...r.filter((p) => p !== root)].slice(0, 12));
       await refresh(root, initialFilters);
@@ -1116,12 +1128,14 @@ export default function App() {
                   </IconButton>
                 </div>
                 <div
-                  className={`bottom-grid ${bottomTab !== "log" ? "alternate-bottom" : ""}`}
+                  className={`bottom-grid ${bottomTab !== "log" ? "alternate-bottom" : !logDetails ? "log-details-hidden" : ""}`}
                 >
                   <BranchPanel
                     snapshot={snapshot}
                     filter={filters.ref}
-                    onFilter={(ref) => setFilters({ ...filters, ref })}
+                    onFilter={(ref) =>
+                      setFilters({ ...filters, ref, refs: [], limit: 300 })
+                    }
                     {...{ checkout }}
                     create={() => createBranch()}
                     manage={setBranchManage}
@@ -1144,24 +1158,40 @@ export default function App() {
                         snapshot={snapshot}
                         selected={selectedCommit}
                         select={setSelectedCommit}
-                        {...{ filters, setFilters, loading }}
+                        {...{
+                          filters,
+                          setFilters,
+                          loading,
+                          busy,
+                          mutate,
+                          notify,
+                        }}
+                        error={logError}
+                        action={commitAction}
+                        createBranch={(hash) => createBranch(hash)}
+                        currentPath={tab?.path}
+                        onDetailsChange={setLogDetails}
                         refresh={() => void refresh()}
                       />
-                      <div
-                        className="resize-x"
-                        role="separator"
-                        aria-label="调整详情面板宽度"
-                        onPointerDown={(e) => resize("right", e)}
-                      />
-                      <CommitDetails
-                        repo={repo}
-                        hash={selectedCommit}
-                        {...{ detail, setDetail, notify }}
-                        openDiff={(p, commit, oldPath) =>
-                          openFile(p, { kind: "diff", commit, oldPath })
-                        }
-                        action={commitAction}
-                      />
+                      {logDetails && (
+                        <>
+                          <div
+                            className="resize-x"
+                            role="separator"
+                            aria-label="调整详情面板宽度"
+                            onPointerDown={(e) => resize("right", e)}
+                          />
+                          <CommitDetails
+                            repo={repo}
+                            hash={selectedCommit}
+                            {...{ detail, setDetail, notify }}
+                            openDiff={(p, commit, oldPath) =>
+                              openFile(p, { kind: "diff", commit, oldPath })
+                            }
+                            action={commitAction}
+                          />
+                        </>
+                      )}
                     </>
                   ) : bottomTab === "console" ? (
                     <ConsolePanel logs={logs} />
