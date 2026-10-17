@@ -1120,20 +1120,14 @@ hr {
   width: 3px;
   border-radius: 1px;
 }
-.line-change-mark.add,
-.line-change-legend .add {
+.line-change-mark.add {
   background: var(--line-added);
 }
-.line-change-mark.change,
-.line-change-legend .change {
+.line-change-mark.change {
   background: var(--line-modified);
 }
-.line-change-mark.format,
-.line-change-legend .format {
+.line-change-mark.format {
   background: var(--line-format);
-}
-.line-change-legend .delete {
-  background: var(--line-deleted);
 }
 .line-change-mark[data-deleted-before]::before,
 .line-change-mark[data-deleted-after]::after {
@@ -1150,30 +1144,6 @@ hr {
 }
 .line-change-mark[data-deleted-after]::after {
   bottom: -3px;
-}
-.line-change-legend,
-.line-change-legend > span {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-.line-change-legend {
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.line-change-legend > span {
-  white-space: nowrap;
-}
-.line-change-legend i {
-  width: 3px;
-  height: 11px;
-  border-radius: 1px;
-}
-.editor-footer:has(.line-change-legend) {
-  height: auto;
-  min-height: 27px;
-  flex-wrap: wrap;
-  padding-block: 4px;
 }
 .edit-line-mirror {
   position: absolute;

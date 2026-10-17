@@ -88,28 +88,6 @@ function LineMarker({ change }: { change?: LineChange }) {
     />
   );
 }
-function ChangeLegend() {
-  return (
-    <span className="line-change-legend" aria-label="行改动标记图例">
-      <span>
-        <i className="add" />
-        新增
-      </span>
-      <span>
-        <i className="change" />
-        修改
-      </span>
-      <span>
-        <i className="delete" />
-        删除
-      </span>
-      <span title="暂存和提交时自动排除，文件保留原格式">
-        <i className="format" />
-        格式 · 不提交
-      </span>
-    </span>
-  );
-}
 export function Editor({
   repo,
   tab,
@@ -347,7 +325,9 @@ export function Editor({
     }
   };
   const codeMatch = (text?: string) =>
-    search && text?.toLowerCase().includes(search.toLowerCase())
+    tab?.kind === "diff" &&
+    search &&
+    text?.toLowerCase().includes(search.toLowerCase())
       ? " search-match"
       : "";
   return (
@@ -571,14 +551,6 @@ export function Editor({
                   }}
                 />
               </div>
-              <div className="editor-footer">
-                <span>{dirty ? "有未保存的修改" : "所有修改已保存"}</span>
-                <ChangeLegend />
-                <span className="spacer" />
-                <span>{draft.split("\n").length} 行</span>
-                <span>UTF-8</span>
-                <span>{data?.after.includes("\r\n") ? "CRLF" : "LF"}</span>
-              </div>
             </div>
           ) : (
             <>
@@ -694,34 +666,31 @@ export function Editor({
                     </button>
                   )}
               </div>
-              <div className="editor-footer">
-                <div className="editor-search input-shell">
-                  <Search size={12} />
-                  <input
-                    aria-label="在文件中查找"
-                    placeholder="在文件中查找…"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                  />
+              {tab.kind === "diff" && (
+                <div className="editor-footer">
+                  <div className="editor-search input-shell">
+                    <Search size={12} />
+                    <input
+                      aria-label="在文件中查找"
+                      placeholder="在文件中查找…"
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                    />
+                  </div>
+                  <label className="checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={ignoreWhitespace}
+                      onChange={(e) => setIgnoreWhitespace(e.target.checked)}
+                    />
+                    忽略空白
+                  </label>
+                  <span className="muted">{matches.length} 处改动</span>
+                  <span className="spacer" />
+                  <span>UTF-8</span>
+                  <span>{data?.after.includes("\r\n") ? "CRLF" : "LF"}</span>
                 </div>
-                {tab.kind === "diff" && (
-                  <>
-                    <label className="checkbox-label">
-                      <input
-                        type="checkbox"
-                        checked={ignoreWhitespace}
-                        onChange={(e) => setIgnoreWhitespace(e.target.checked)}
-                      />
-                      忽略空白
-                    </label>
-                    <span className="muted">{matches.length} 处改动</span>
-                  </>
-                )}
-                {tab.kind === "file" && <ChangeLegend />}
-                <span className="spacer" />
-                <span>UTF-8</span>
-                <span>{data?.after.includes("\r\n") ? "CRLF" : "LF"}</span>
-              </div>
+              )}
             </>
           )}
         </>
