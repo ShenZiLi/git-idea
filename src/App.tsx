@@ -63,10 +63,21 @@ import {
   ConfirmDialog,
   FormDialog,
   Modal,
+  Popover,
   type ConfirmSpec,
   type FormSpec,
 } from "./components/Dialogs";
 import { BranchLabel, Empty, IconButton, Spinner } from "./components/ui";
+import {
+  IconSwap,
+  Presence,
+  useInputModality,
+  useTheme,
+} from "./components/Motion";
+import {
+  Notification,
+  type NotificationMessage,
+} from "./components/Notification";
 
 const initialFilters: LogFilters = {
   search: "",
@@ -102,10 +113,7 @@ export default function App() {
     [help, setHelp] = useState(false);
   const [remoteDialog, setRemoteDialog] = useState(false),
     [editorDirty, setEditorDirty] = useState(false);
-  const [toast, setToast] = useState<{
-      message: string;
-      error: boolean;
-    } | null>(null),
+  const [toast, setToast] = useState<NotificationMessage | null>(null),
     [theme, setTheme] = useState("dark"),
     [fontSize, setFontSize] = useState(13),
     [status, setStatus] = useState("就绪");
@@ -124,13 +132,12 @@ export default function App() {
     refreshSequence = useRef(0),
     repoRef = useRef(""),
     filtersRef = useRef(filters),
-    busyRef = useRef(false),
-    toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    busyRef = useRef(false);
+  useInputModality();
+  useTheme(theme);
   filtersRef.current = filters;
   const notify = useCallback((message: string, error = false) => {
     setToast({ message, error });
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), error ? 12000 : 4500);
   }, []);
   const refresh = useCallback(
     async (target = repoRef.current, values = filters, files = true) => {
@@ -192,9 +199,6 @@ export default function App() {
         if (target) await openRepository(target);
       })
       .catch((e) => notify(e.message, true));
-    return () => {
-      if (toastTimer.current) clearTimeout(toastTimer.current);
-    };
   }, []);
   useEffect(() => {
     if (!repo) return;
@@ -214,9 +218,8 @@ export default function App() {
     return () => window.removeEventListener("focus", focus);
   }, [refresh]);
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
     document.documentElement.style.setProperty("--font-size", `${fontSize}px`);
-  }, [theme, fontSize]);
+  }, [fontSize]);
   useEffect(() => {
     const handler = (event: BeforeUnloadEvent) => {
       if (editorDirty) {
@@ -700,50 +703,51 @@ export default function App() {
             title="主菜单"
             onClick={() => setMainMenu(!mainMenu)}
             active={mainMenu}
+            aria-haspopup="menu"
+            aria-expanded={mainMenu}
           >
             <Menu size={20} />
           </IconButton>
-          {mainMenu && (
-            <>
-              <button
-                className="popover-dismiss"
-                aria-label="关闭主菜单"
-                onClick={() => setMainMenu(false)}
-              />
-              <div className="menu popover main-menu">
-                <button onClick={() => repoDialog("open")}>
-                  <FolderOpen size={15} />
-                  打开仓库…<kbd>Ctrl O</kbd>
-                </button>
-                <button onClick={() => repoDialog("clone")}>
-                  <Download size={15} />
-                  克隆仓库…
-                </button>
-                <button onClick={() => repoDialog("init")}>
-                  <Plus size={15} />
-                  初始化仓库…
-                </button>
-                <hr />
-                <button onClick={settings}>
-                  <Settings size={15} />
-                  设置…
-                </button>
-                <button
-                  onClick={() => {
-                    setHelp(true);
-                    setMainMenu(false);
-                  }}
-                >
-                  <CircleHelp size={15} />
-                  快捷键与帮助
-                </button>
-              </div>
-            </>
-          )}
+          <Popover
+            open={mainMenu}
+            onClose={() => setMainMenu(false)}
+            label="主菜单"
+            className="main-menu"
+          >
+            <button role="menuitem" onClick={() => repoDialog("open")}>
+              <FolderOpen size={15} />
+              打开仓库…<kbd>Ctrl O</kbd>
+            </button>
+            <button role="menuitem" onClick={() => repoDialog("clone")}>
+              <Download size={15} />
+              克隆仓库…
+            </button>
+            <button role="menuitem" onClick={() => repoDialog("init")}>
+              <Plus size={15} />
+              初始化仓库…
+            </button>
+            <hr />
+            <button role="menuitem" onClick={settings}>
+              <Settings size={15} />
+              设置…
+            </button>
+            <button
+              role="menuitem"
+              onClick={() => {
+                setHelp(true);
+                setMainMenu(false);
+              }}
+            >
+              <CircleHelp size={15} />
+              快捷键与帮助
+            </button>
+          </Popover>
         </div>
         <div className="popover-anchor">
           <button
             className="project-selector"
+            aria-haspopup="menu"
+            aria-expanded={repoMenu}
             onClick={() => setRepoMenu(!repoMenu)}
           >
             <span className="project-badge">
@@ -752,45 +756,42 @@ export default function App() {
             <strong>{snapshot?.name || "Git IDEA"}</strong>
             <ChevronDown size={13} />
           </button>
-          {repoMenu && (
-            <>
+          <Popover
+            open={repoMenu}
+            onClose={() => setRepoMenu(false)}
+            label="仓库菜单"
+            className="repo-menu"
+          >
+            <div className="menu-caption">最近的仓库</div>
+            {recent.map((p) => (
               <button
-                className="popover-dismiss"
-                aria-label="关闭仓库菜单"
-                onClick={() => setRepoMenu(false)}
-              />
-              <div className="menu popover repo-menu">
-                <div className="menu-caption">最近的仓库</div>
-                {recent.map((p) => (
-                  <button
-                    title={p}
-                    key={p}
-                    onClick={() => void openRepository(p)}
-                  >
-                    <FolderGit2 size={14} />
-                    <span className="truncate">
-                      {p.split(/[/\\]/).at(-1)}
-                      <small className="muted">{p}</small>
-                    </span>
-                    {p === repo && <Check size={14} />}
-                  </button>
-                ))}
-                <hr />
-                <button onClick={() => repoDialog("open")}>
-                  <FolderOpen size={14} />
-                  打开仓库…
-                </button>
-                <button onClick={() => repoDialog("clone")}>
-                  <Download size={14} />
-                  克隆…
-                </button>
-                <button onClick={() => repoDialog("init")}>
-                  <Plus size={14} />
-                  新建仓库…
-                </button>
-              </div>
-            </>
-          )}
+                role="menuitem"
+                title={p}
+                key={p}
+                onClick={() => void openRepository(p)}
+              >
+                <FolderGit2 size={14} />
+                <span className="truncate">
+                  {p.split(/[/\\]/).at(-1)}
+                  <small className="muted">{p}</small>
+                </span>
+                {p === repo && <Check size={14} />}
+              </button>
+            ))}
+            <hr />
+            <button role="menuitem" onClick={() => repoDialog("open")}>
+              <FolderOpen size={14} />
+              打开仓库…
+            </button>
+            <button role="menuitem" onClick={() => repoDialog("clone")}>
+              <Download size={14} />
+              克隆…
+            </button>
+            <button role="menuitem" onClick={() => repoDialog("init")}>
+              <Plus size={14} />
+              新建仓库…
+            </button>
+          </Popover>
         </div>
         <span className="title-divider" />
         <button
@@ -843,10 +844,15 @@ export default function App() {
           </IconButton>
           <IconButton
             title="刷新仓库（Ctrl R）"
+            static
             disabled={busy || loading || !repo}
             onClick={() => void refresh()}
           >
-            {loading ? <Spinner /> : <RefreshCw size={15} />}
+            <IconSwap
+              active={loading}
+              on={<Spinner />}
+              off={<RefreshCw size={15} />}
+            />
           </IconButton>
         </div>
         <IconButton
@@ -1148,13 +1154,18 @@ export default function App() {
           <span className="rail-spacer" />
           <IconButton
             title="切换深浅主题"
+            static
             onClick={() => {
               const next = theme === "dark" ? "light" : "dark";
               setTheme(next);
               void request("preferences", undefined, { theme: next });
             }}
           >
-            {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
+            <IconSwap
+              active={theme === "dark"}
+              on={<Sun size={17} />}
+              off={<Moon size={17} />}
+            />
           </IconButton>
         </nav>
       </div>
@@ -1180,227 +1191,223 @@ export default function App() {
           {snapshot?.gitVersion.replace("git version ", "Git ") || "本地 Git"}
         </span>
       </footer>
-      {toast && (
-        <div
-          className={`toast ${toast.error ? "error" : ""}`}
-          role={toast.error ? "alert" : "status"}
-        >
-          <span className="toast-icon">
-            {toast.error ? "!" : <Check size={16} />}
-          </span>
-          <div>
-            <strong>{toast.error ? "操作未完成" : "Git IDEA"}</strong>
-            <pre>{toast.message}</pre>
-            {toast.error && (
-              <button
-                className="text-button"
-                onClick={() => {
-                  setBottomTab("console");
-                  setLogVisible(true);
-                  setToast(null);
-                }}
-              >
-                查看控制台
-              </button>
-            )}
-          </div>
-          <IconButton title="关闭通知" onClick={() => setToast(null)}>
-            <X size={14} />
-          </IconButton>
-        </div>
-      )}
-      {form && (
-        <FormDialog
-          key={form.title}
-          spec={form}
-          onClose={() => setForm(null)}
-        />
-      )}
-      {confirmation && (
-        <ConfirmDialog
-          spec={confirmation}
-          onClose={() => setConfirmation(null)}
-        />
-      )}
-      {switcher && snapshot && (
-        <BranchSwitcher
-          snapshot={snapshot}
-          {...{ checkout }}
-          create={() => createBranch()}
-          onClose={() => setSwitcher(false)}
-        />
-      )}
-      {remoteDialog && (
-        <Modal title="管理远程仓库" onClose={() => setRemoteDialog(false)}>
-          <div className="remote-list">
-            {snapshot?.remotes.map((remote) => (
-              <div className="remote-entry" key={remote.name}>
-                <FolderGit2 size={17} />
-                <div>
-                  <strong>{remote.name}</strong>
-                  <span className="muted">{remote.url}</span>
+      <Presence>
+        {toast && (
+          <Notification
+            notification={toast}
+            onDismiss={() => setToast(null)}
+            onConsole={() => {
+              setBottomTab("console");
+              setLogVisible(true);
+              setToast(null);
+            }}
+          />
+        )}
+      </Presence>
+      <Presence>
+        {form && (
+          <FormDialog
+            key={form.title}
+            spec={form}
+            onClose={() => setForm(null)}
+          />
+        )}
+      </Presence>
+      <Presence>
+        {confirmation && (
+          <ConfirmDialog
+            spec={confirmation}
+            onClose={() => setConfirmation(null)}
+          />
+        )}
+      </Presence>
+      <Presence>
+        {switcher && snapshot && (
+          <BranchSwitcher
+            snapshot={snapshot}
+            {...{ checkout }}
+            create={() => createBranch()}
+            onClose={() => setSwitcher(false)}
+          />
+        )}
+      </Presence>
+      <Presence>
+        {remoteDialog && (
+          <Modal title="管理远程仓库" onClose={() => setRemoteDialog(false)}>
+            <div className="remote-list">
+              {snapshot?.remotes.map((remote) => (
+                <div className="remote-entry" key={remote.name}>
+                  <FolderGit2 size={17} />
+                  <div>
+                    <strong>{remote.name}</strong>
+                    <span className="muted">{remote.url}</span>
+                  </div>
+                  <IconButton
+                    title={`移除远程 ${remote.name}`}
+                    onClick={() => {
+                      setRemoteDialog(false);
+                      confirm(
+                        "移除远程仓库",
+                        `从本地配置移除 ${remote.name}：${remote.url}。远程服务器上的仓库不受影响。`,
+                        () => mutate("remote.remove", { name: remote.name }),
+                      );
+                    }}
+                  >
+                    <X size={15} />
+                  </IconButton>
                 </div>
-                <IconButton
-                  title={`移除远程 ${remote.name}`}
+              ))}
+              {!snapshot?.remotes.length && <Empty title="还没有远程仓库" />}
+            </div>
+            <div className="modal-footer">
+              <button onClick={() => setRemoteDialog(false)}>关闭</button>
+              <button className="primary" onClick={addRemote}>
+                <Plus size={14} />
+                添加远程…
+              </button>
+            </div>
+          </Modal>
+        )}
+      </Presence>
+      <Presence>
+        {branchManage && (
+          <Modal
+            title={`分支 · ${branchManage.name}`}
+            onClose={() => setBranchManage(null)}
+          >
+            <div className="action-list">
+              {!branchManage.current && (
+                <button
                   onClick={() => {
-                    setRemoteDialog(false);
-                    confirm(
-                      "移除远程仓库",
-                      `从本地配置移除 ${remote.name}：${remote.url}。远程服务器上的仓库不受影响。`,
-                      () => mutate("remote.remove", { name: remote.name }),
-                    );
+                    checkout(branchManage);
+                    setBranchManage(null);
                   }}
                 >
-                  <X size={15} />
-                </IconButton>
-              </div>
-            ))}
-            {!snapshot?.remotes.length && <Empty title="还没有远程仓库" />}
-          </div>
-          <div className="modal-footer">
-            <button onClick={() => setRemoteDialog(false)}>关闭</button>
-            <button className="primary" onClick={addRemote}>
-              <Plus size={14} />
-              添加远程…
-            </button>
-          </div>
-        </Modal>
-      )}
-      {branchManage && (
-        <Modal
-          title={`分支 · ${branchManage.name}`}
-          onClose={() => setBranchManage(null)}
-        >
-          <div className="action-list">
-            {!branchManage.current && (
+                  <GitBranch size={16} />
+                  检出此分支
+                </button>
+              )}
               <button
                 onClick={() => {
-                  checkout(branchManage);
+                  createBranch(branchManage.ref);
                   setBranchManage(null);
                 }}
               >
-                <GitBranch size={16} />
-                检出此分支
+                <Plus size={16} />
+                从此分支创建…
               </button>
-            )}
-            <button
-              onClick={() => {
-                createBranch(branchManage.ref);
-                setBranchManage(null);
-              }}
-            >
-              <Plus size={16} />
-              从此分支创建…
-            </button>
-            {!branchManage.current && (
-              <>
-                <button
-                  onClick={() => {
-                    const b = branchManage;
-                    setBranchManage(null);
-                    confirm(
-                      "合并分支",
-                      `将 ${b.name} 合并到 ${snapshot?.branch}。`,
-                      () => mutate("merge", { ref: b.ref }),
-                    );
-                  }}
-                >
-                  <GitMerge size={16} />
-                  合并到当前分支
-                </button>
-                <button
-                  onClick={() => {
-                    const b = branchManage;
-                    setBranchManage(null);
-                    confirm(
-                      "变基当前分支",
-                      `将 ${snapshot?.branch} 变基到 ${b.name}。这会重写当前分支上的提交。`,
-                      () => mutate("rebase", { ref: b.ref }),
-                    );
-                  }}
-                >
-                  <GitPullRequestArrow size={16} />
-                  将当前分支变基到此处
-                </button>
-              </>
-            )}
-            {!branchManage.remote && (
-              <>
-                <button
-                  onClick={() => {
-                    const b = branchManage;
-                    setBranchManage(null);
-                    setForm({
-                      title: "重命名分支",
-                      fields: [
-                        { key: "newName", label: "新名称", value: b.name },
-                      ],
-                      submitLabel: "重命名",
-                      onSubmit: (v) =>
-                        mutate("branch.rename", { name: b.name, ...v }),
-                    });
-                  }}
-                >
-                  <FileDiff size={16} />
-                  重命名…
-                </button>
-                {!branchManage.current && (
+              {!branchManage.current && (
+                <>
                   <button
-                    className="red"
                     onClick={() => {
                       const b = branchManage;
                       setBranchManage(null);
                       confirm(
-                        "删除本地分支",
-                        `删除 ${b.name}。Git 会拒绝删除含有未合并提交的分支。`,
-                        () => mutate("branch.delete", { name: b.name }),
+                        "合并分支",
+                        `将 ${b.name} 合并到 ${snapshot?.branch}。`,
+                        () => mutate("merge", { ref: b.ref }),
                       );
                     }}
                   >
-                    <X size={16} />
-                    删除分支
+                    <GitMerge size={16} />
+                    合并到当前分支
                   </button>
-                )}
-              </>
-            )}
-          </div>
-        </Modal>
-      )}
-      {help && (
-        <Modal title="Git IDEA · 快捷键与帮助" onClose={() => setHelp(false)}>
-          <div className="help-content">
-            <div className="help-logo">
-              <GitBranch size={25} />
-              <div>
-                <h2>Git IDEA</h2>
-                <span className="muted">熟悉的布局，完整的 Git 工作流</span>
-              </div>
+                  <button
+                    onClick={() => {
+                      const b = branchManage;
+                      setBranchManage(null);
+                      confirm(
+                        "变基当前分支",
+                        `将 ${snapshot?.branch} 变基到 ${b.name}。这会重写当前分支上的提交。`,
+                        () => mutate("rebase", { ref: b.ref }),
+                      );
+                    }}
+                  >
+                    <GitPullRequestArrow size={16} />
+                    将当前分支变基到此处
+                  </button>
+                </>
+              )}
+              {!branchManage.remote && (
+                <>
+                  <button
+                    onClick={() => {
+                      const b = branchManage;
+                      setBranchManage(null);
+                      setForm({
+                        title: "重命名分支",
+                        fields: [
+                          { key: "newName", label: "新名称", value: b.name },
+                        ],
+                        submitLabel: "重命名",
+                        onSubmit: (v) =>
+                          mutate("branch.rename", { name: b.name, ...v }),
+                      });
+                    }}
+                  >
+                    <FileDiff size={16} />
+                    重命名…
+                  </button>
+                  {!branchManage.current && (
+                    <button
+                      className="red"
+                      onClick={() => {
+                        const b = branchManage;
+                        setBranchManage(null);
+                        confirm(
+                          "删除本地分支",
+                          `删除 ${b.name}。Git 会拒绝删除含有未合并提交的分支。`,
+                          () => mutate("branch.delete", { name: b.name }),
+                        );
+                      }}
+                    >
+                      <X size={16} />
+                      删除分支
+                    </button>
+                  )}
+                </>
+              )}
             </div>
-            {[
-              ["Ctrl / ⌘ + O", "打开本地仓库"],
-              ["Ctrl / ⌘ + K", "聚焦提交信息"],
-              ["Ctrl / ⌘ + Enter", "提交已暂存的更改"],
-              ["Ctrl / ⌘ + R", "刷新仓库"],
-              ["Ctrl / ⌘ + 1", "显示或隐藏项目"],
-              ["Ctrl / ⌘ + 9", "显示或隐藏 Git 日志"],
-              ["Ctrl / ⌘ + S", "保存正在编辑的文件"],
-              ["↑ / ↓", "在提交日志中移动"],
-              ["双击分支", "检出分支"],
-            ].map(([keys, label]) => (
-              <div className="shortcut-row" key={keys}>
-                <span>{label}</span>
-                <kbd>{keys}</kbd>
+          </Modal>
+        )}
+      </Presence>
+      <Presence>
+        {help && (
+          <Modal title="Git IDEA · 快捷键与帮助" onClose={() => setHelp(false)}>
+            <div className="help-content">
+              <div className="help-logo">
+                <GitBranch size={25} />
+                <div>
+                  <h2>Git IDEA</h2>
+                  <span className="muted">熟悉的布局，完整的 Git 工作流</span>
+                </div>
               </div>
-            ))}
-            <p className="muted">
-              拖动面板间的分隔线调整布局。点击日志中的提交可查看详情，点击文件可查看差异。冲突文件可在编辑器修改、保存，再暂存为已解决。
-            </p>
-            <span className="tiny muted">
-              Git IDEA 0.1.0 · 使用系统 Git · Windows / macOS / Linux
-            </span>
-          </div>
-        </Modal>
-      )}
+              {[
+                ["Ctrl / ⌘ + O", "打开本地仓库"],
+                ["Ctrl / ⌘ + K", "聚焦提交信息"],
+                ["Ctrl / ⌘ + Enter", "提交已暂存的更改"],
+                ["Ctrl / ⌘ + R", "刷新仓库"],
+                ["Ctrl / ⌘ + 1", "显示或隐藏项目"],
+                ["Ctrl / ⌘ + 9", "显示或隐藏 Git 日志"],
+                ["Ctrl / ⌘ + S", "保存正在编辑的文件"],
+                ["↑ / ↓", "在提交日志中移动"],
+                ["双击分支", "检出分支"],
+              ].map(([keys, label]) => (
+                <div className="shortcut-row" key={keys}>
+                  <span>{label}</span>
+                  <kbd>{keys}</kbd>
+                </div>
+              ))}
+              <p className="muted">
+                拖动面板间的分隔线调整布局。点击日志中的提交可查看详情，点击文件可查看差异。冲突文件可在编辑器修改、保存，再暂存为已解决。
+              </p>
+              <span className="tiny muted">
+                Git IDEA 0.1.0 · 使用系统 Git · Windows / macOS / Linux
+              </span>
+            </div>
+          </Modal>
+        )}
+      </Presence>
     </div>
   );
 }

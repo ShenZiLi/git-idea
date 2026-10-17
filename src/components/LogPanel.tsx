@@ -30,6 +30,7 @@ import type {
 } from "../../shared/types";
 import { graphRows } from "../graph";
 import { request } from "../api";
+import { Popover } from "./Dialogs";
 import {
   BranchLabel,
   dateTime,
@@ -108,36 +109,38 @@ export function CommitDetails({
           <Copy size={13} />
         </IconButton>
         <div className="popover-anchor">
-          <IconButton title="更多提交操作" onClick={() => setMenu(!menu)}>
+          <IconButton
+            title="更多提交操作"
+            aria-haspopup="menu"
+            aria-expanded={menu}
+            onClick={() => setMenu(!menu)}
+          >
             <MoreHorizontal size={16} />
           </IconButton>
-          {menu && (
-            <>
+          <Popover
+            open={menu}
+            onClose={() => setMenu(false)}
+            label="提交菜单"
+            className="commit-menu"
+          >
+            {[
+              ["cherry-pick", "拣选此提交"],
+              ["revert", "还原此提交"],
+              ["reset", "重置到此提交…"],
+              ["tag", "创建标签…"],
+            ].map(([name, label]) => (
               <button
-                className="popover-dismiss"
-                aria-label="关闭提交菜单"
-                onClick={() => setMenu(false)}
-              />
-              <div className="menu popover commit-menu">
-                {[
-                  ["cherry-pick", "拣选此提交"],
-                  ["revert", "还原此提交"],
-                  ["reset", "重置到此提交…"],
-                  ["tag", "创建标签…"],
-                ].map(([name, label]) => (
-                  <button
-                    key={name}
-                    onClick={() => {
-                      if (detail) action(name, detail.commit);
-                      setMenu(false);
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
+                role="menuitem"
+                key={name}
+                onClick={() => {
+                  if (detail) action(name, detail.commit);
+                  setMenu(false);
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </Popover>
         </div>
       </div>
       {loading ? (

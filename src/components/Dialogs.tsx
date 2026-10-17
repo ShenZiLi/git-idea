@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useContext,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   AlertTriangle,
   Check,
@@ -10,6 +17,7 @@ import {
 } from "lucide-react";
 import type { Branch, RepoSnapshot } from "../../shared/types";
 import { IconButton, Spinner } from "./ui";
+import { Presence, PresenceContext } from "./Motion";
 
 export interface FormField {
   key: string;
@@ -47,16 +55,27 @@ export function Modal({
   wide?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
+  const present = useContext(PresenceContext);
+  const titleId = useId();
+  const close = useRef(onClose);
+  close.current = onClose;
+  useLayoutEffect(() => {
+    if (!present) return;
     const previous = document.activeElement as HTMLElement | null;
-    const first = ref.current?.querySelector<HTMLElement>(
-      "input,select,textarea,button",
-    );
+    const first =
+      ref.current?.querySelector<HTMLElement>(
+        "input:not(:disabled),select:not(:disabled),textarea:not(:disabled)",
+      ) || ref.current?.querySelector<HTMLElement>("button:not(:disabled)");
     first?.focus();
     const handler = (e: KeyboardEvent) => {
+      const dialogs = document.querySelectorAll(
+        '[role="dialog"]:not([inert] *)',
+      );
+      if (dialogs[dialogs.length - 1] !== ref.current) return;
       if (e.key === "Escape") {
-        e.stopPropagation();
-        onClose();
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        close.current();
       }
       if (e.key === "Tab") {
         const focusable = Array.from(
@@ -76,9 +95,10 @@ export function Modal({
     document.addEventListener("keydown", handler, true);
     return () => {
       document.removeEventListener("keydown", handler, true);
-      previous?.focus();
+      if (previous?.isConnected && !previous.closest("[inert]"))
+        previous.focus();
     };
-  }, []);
+  }, [present]);
   return (
     <div
       className="modal-backdrop"
@@ -91,10 +111,10 @@ export function Modal({
         className={`modal ${wide ? "wide" : ""}`}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="dialog-title"
+        aria-labelledby={titleId}
       >
         <div className="modal-title">
-          <strong id="dialog-title">{title}</strong>
+          <strong id={titleId}>{title}</strong>
           <IconButton title="关闭对话框" onClick={onClose}>
             <X size={16} />
           </IconButton>
@@ -102,6 +122,101 @@ export function Modal({
         {children}
       </div>
     </div>
+  );
+}
+
+export function Popover({
+  open,
+  onClose,
+  label,
+  className = "",
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  label: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <Presence>
+      {open && (
+        <PopoverSurface onClose={onClose} label={label} className={className}>
+          {children}
+        </PopoverSurface>
+      )}
+    </Presence>
+  );
+}
+
+function PopoverSurface({
+  onClose,
+  label,
+  className,
+  children,
+}: {
+  onClose: () => void;
+  label: string;
+  className: string;
+  children: ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const present = useContext(PresenceContext);
+  const close = useRef(onClose);
+  close.current = onClose;
+  useLayoutEffect(() => {
+    if (!present) return;
+    const previous = document.activeElement as HTMLElement | null;
+    ref.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        close.current();
+      } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+        const items = Array.from(
+          ref.current?.querySelectorAll<HTMLButtonElement>(
+            "button:not(:disabled)",
+          ) || [],
+        );
+        const index = items.indexOf(
+          document.activeElement as HTMLButtonElement,
+        );
+        const next =
+          event.key === "Home"
+            ? 0
+            : event.key === "End"
+              ? items.length - 1
+              : (index + (event.key === "ArrowDown" ? 1 : -1) + items.length) %
+                items.length;
+        event.preventDefault();
+        items[next]?.focus();
+      } else if (event.key === "Tab") close.current();
+    };
+    document.addEventListener("keydown", handler, true);
+    return () => {
+      document.removeEventListener("keydown", handler, true);
+      if (previous?.isConnected && !previous.closest("[inert]"))
+        previous.focus();
+    };
+  }, [present]);
+  return (
+    <>
+      <button
+        className="popover-dismiss"
+        tabIndex={-1}
+        aria-label={`关闭${label}`}
+        onClick={onClose}
+      />
+      <div
+        ref={ref}
+        role="menu"
+        aria-label={label}
+        className={`menu popover ${className}`}
+      >
+        {children}
+      </div>
+    </>
   );
 }
 export function FormDialog({

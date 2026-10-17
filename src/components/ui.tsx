@@ -15,14 +15,19 @@ export function IconButton({
   title,
   children,
   active,
+  className = "",
+  static: isStatic = false,
   ...rest
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
   title: string;
   active?: boolean;
+  static?: boolean;
 }) {
   return (
     <button
-      className={`icon-button ${active ? "active" : ""} ${rest.className || ""}`}
+      className={`icon-button ${active ? "active" : ""} ${className}`}
+      data-press={isStatic ? undefined : "scale"}
+      aria-pressed={active}
       aria-label={title}
       title={title}
       {...rest}
@@ -127,7 +132,7 @@ export function Group({
 }) {
   return (
     <section className="tree-group">
-      <button className="group-title" onClick={onToggle}>
+      <button className="group-title" aria-expanded={open} onClick={onToggle}>
         <ChevronRight size={13} className={open ? "rotate" : ""} />
         {name}
         {count !== undefined && <span className="count">{count}</span>}
