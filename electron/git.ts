@@ -28,6 +28,7 @@ export async function git(
   cwd: string,
   args: string[],
   input?: string,
+  acceptedExitCodes: readonly number[] = [0],
 ): Promise<string> {
   const start = Date.now();
   return new Promise((resolve, reject) => {
@@ -100,7 +101,7 @@ export async function git(
           `git ${args.map((a) => (/\s/.test(a) ? JSON.stringify(a) : a)).join(" ")}`,
         ),
         output: redact(output.slice(0, 12000)),
-        success: code === 0 && !killed,
+        success: code !== null && acceptedExitCodes.includes(code) && !killed,
         duration: Date.now() - start,
       };
       const readOnly =
@@ -116,6 +117,7 @@ export async function git(
           "rev-list",
           "hash-object",
           "check-ref-format",
+          "check-ignore",
           "show-ref",
           "--version",
         ].includes(args[0]) ||
@@ -126,7 +128,7 @@ export async function git(
       const destination = readOnly ? logs : operationLogs;
       destination.push(entry);
       if (destination.length > (readOnly ? 150 : 300)) destination.shift();
-      if (code === 0 && !killed) resolve(stdout);
+      if (entry.success) resolve(stdout);
       else reject(new Error(redact(output.trim() || `Git 退出码 ${code}`)));
     });
     child.stdin.on("error", () => {});
@@ -447,19 +449,40 @@ export async function snapshot(
 }
 export async function tree(repo: string, directory = ""): Promise<TreeEntry[]> {
   const diskPath = directory ? await safeDiskPath(repo, directory) : repo;
-  return (await fs.readdir(diskPath, { withFileTypes: true }))
+  const entries = (await fs.readdir(diskPath, { withFileTypes: true }))
     .filter((e) => e.name !== ".git")
     .map((e) => ({
       name: e.name,
       path: [directory, e.name].filter(Boolean).join("/"),
       directory: e.isDirectory(),
       symlink: e.isSymbolicLink(),
+      ignored: false,
     }))
     .sort(
       (a, b) =>
         Number(b.directory) - Number(a.directory) ||
         a.name.localeCompare(b.name),
     );
+  if (!entries.length) return entries;
+  const ignored = new Set(
+    (
+      await git(
+        repo,
+        ["check-ignore", "--stdin", "-z"],
+        entries
+          .map((entry) => entry.path + (entry.directory ? "/" : ""))
+          .join("\0") + "\0",
+        [0, 1],
+      )
+    )
+      .split("\0")
+      .filter(Boolean)
+      .map((file) => file.replace(/\/$/, "")),
+  );
+  return entries.map((entry) => ({
+    ...entry,
+    ignored: ignored.has(entry.path),
+  }));
 }
 export async function readFile(
   repo: string,

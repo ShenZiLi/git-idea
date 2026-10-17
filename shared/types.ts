@@ -61,6 +61,7 @@ export interface TreeEntry {
   path: string;
   directory: boolean;
   symlink: boolean;
+  ignored: boolean;
 }
 export interface DiffData {
   path: string;
@@ -96,6 +97,8 @@ export interface Preferences {
   lastRepo?: string;
   theme?: string;
   fontSize?: number;
+  uiFontFamily?: string;
+  editorFontFamily?: string;
 }
 export interface ApiRequest {
   method: string;

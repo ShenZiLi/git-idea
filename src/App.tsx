@@ -116,6 +116,8 @@ export default function App() {
   const [toast, setToast] = useState<NotificationMessage | null>(null),
     [theme, setTheme] = useState("dark"),
     [fontSize, setFontSize] = useState(13),
+    [uiFontFamily, setUiFontFamily] = useState(""),
+    [editorFontFamily, setEditorFontFamily] = useState(""),
     [status, setStatus] = useState("就绪");
   const [widths, setWidths] = useState(() => {
     try {
@@ -195,6 +197,8 @@ export default function App() {
         setRecent(boot.preferences.recent);
         setTheme(boot.preferences.theme || "dark");
         setFontSize(boot.preferences.fontSize || 13);
+        setUiFontFamily(boot.preferences.uiFontFamily || "");
+        setEditorFontFamily(boot.preferences.editorFontFamily || "");
         const target = boot.defaultRepo || boot.preferences.lastRepo;
         if (target) await openRepository(target);
       })
@@ -220,6 +224,19 @@ export default function App() {
   useEffect(() => {
     document.documentElement.style.setProperty("--font-size", `${fontSize}px`);
   }, [fontSize]);
+  useEffect(() => {
+    const root = document.documentElement;
+    const applyFont = (property: string, value: string, fallback: string) => {
+      const names = value
+        .split(",")
+        .map((name) => name.trim().replace(/^(['"])(.*)\1$/, "$2"))
+        .filter(Boolean)
+        .map((name) => JSON.stringify(name));
+      root.style.setProperty(property, [...names, fallback].join(", "));
+    };
+    applyFont("--ui-font", uiFontFamily, "var(--default-ui-font)");
+    applyFont("--code-font", editorFontFamily, "var(--default-code-font)");
+  }, [uiFontFamily, editorFontFamily]);
   useEffect(() => {
     const handler = (event: BeforeUnloadEvent) => {
       if (editorDirty) {
@@ -482,12 +499,14 @@ export default function App() {
                 key: "name",
                 label: "提交者姓名",
                 value: snapshot.identity.name,
+                required: false,
               },
               {
                 key: "email",
                 label: "提交者邮箱",
                 value: snapshot.identity.email,
                 type: "email",
+                required: false,
               },
             ]
           : []),
@@ -509,11 +528,34 @@ export default function App() {
             label: `${n} px`,
           })),
         },
+        {
+          key: "uiFontFamily",
+          label: "界面字体",
+          value: uiFontFamily,
+          placeholder: "例如：Microsoft YaHei UI, Segoe UI",
+          required: false,
+          hint: "填写本机已安装的字体名称；多个字体用英文逗号分隔，留空恢复默认。",
+        },
+        {
+          key: "editorFontFamily",
+          label: "编辑器字体",
+          value: editorFontFamily,
+          placeholder: "例如：Cascadia Code, Consolas",
+          required: false,
+          hint: "用于文件编辑、代码阅读与差异视图；未安装的字体会使用默认字体。",
+        },
       ],
       submitLabel: "保存设置",
       onSubmit: async (values) => {
-        if (
+        const identityChanged =
           snapshot &&
+          (values.name !== snapshot.identity.name ||
+            values.email !== snapshot.identity.email);
+        if (identityChanged && (!values.name.trim() || !values.email.trim())) {
+          throw new Error("修改提交身份时，请同时填写提交者姓名和邮箱。");
+        }
+        if (
+          identityChanged &&
           !(await mutate("identity", {
             name: values.name,
             email: values.email,
@@ -523,9 +565,13 @@ export default function App() {
         await request("preferences", undefined, {
           theme: values.theme,
           fontSize: Number(values.fontSize),
+          uiFontFamily: values.uiFontFamily.trim(),
+          editorFontFamily: values.editorFontFamily.trim(),
         });
         setTheme(values.theme);
         setFontSize(Number(values.fontSize));
+        setUiFontFamily(values.uiFontFamily.trim());
+        setEditorFontFamily(values.editorFontFamily.trim());
         return true;
       },
     });

@@ -2,13 +2,11 @@
 @import "@fontsource/jetbrains-mono/500.css";
 
 :root {
-  font-family:
-    Inter,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    "Microsoft YaHei",
+  --default-ui-font:
+    Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei",
     sans-serif;
+  --ui-font: var(--default-ui-font);
+  font-family: var(--ui-font);
   color: #bcbec4;
   background: #1e1f22;
   font-size: 13px;
@@ -31,7 +29,8 @@
   --gold: #d5a363;
   --added: #22352b;
   --removed: #3b292c;
-  --code-font: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  --default-code-font: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  --code-font: var(--default-code-font);
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-icon: cubic-bezier(0.2, 0, 0, 1);
   --floating: #2b2d30;
@@ -582,6 +581,11 @@ hr {
 .tree-row.selected {
   background: var(--selection);
 }
+.tree-row.ignored,
+.tree-row.ignored svg,
+.tree-row.ignored .file-status {
+  color: var(--faint);
+}
 .tree-spacer {
   width: 13px;
   flex-shrink: 0;
@@ -978,23 +982,67 @@ hr {
   gap: 8px;
   border-bottom: 1px solid var(--border);
   font-size: 11px;
+  flex-wrap: wrap;
 }
 .edit-banner > span {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 120px;
+}
+.edit-banner kbd {
+  font: inherit;
+  opacity: 0.75;
+}
+.editor-mode-button {
+  flex-shrink: 0;
+}
+.editor-mode-button.active {
+  color: var(--blue);
+  background: var(--selection);
+}
+.editor-dirty {
+  color: var(--gold);
+  font-size: 9px;
+}
+.edit-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.edit-line-numbers {
+  margin: 0;
+  padding: 8px 10px 8px 6px;
+  min-width: 45px;
+  overflow: hidden;
+  text-align: right;
+  flex-shrink: 0;
+  font-family: var(--code-font);
+  font-size: var(--editor-font-size, 13px);
+  line-height: 22px;
+  color: var(--faint);
+  border-right: 1px solid var(--subtle-border);
+  user-select: none;
 }
 .edit-area textarea {
   flex: 1;
   font-family: var(--code-font);
   font-size: var(--editor-font-size, 13px);
   line-height: 22px;
-  padding: 12px;
+  padding: 8px 12px;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
   border: 0;
   border-radius: 0;
   white-space: pre;
   tab-size: 2;
+}
+.edit-body.wrap-code textarea {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .commit-panel {
   display: flex;

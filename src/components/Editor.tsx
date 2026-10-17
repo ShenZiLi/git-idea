@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -27,6 +27,7 @@ export interface EditorTab {
   commit?: string;
   oldPath?: string;
 }
+const normalizeLines = (text: string) => text.replaceAll("\r\n", "\n");
 function Highlight({ text }: { text: string }) {
   const parts = text.split(
     /(\/\/.*$|#[^#].*$|"[^"\n]*"|'[^'\n]*'|\b(?:const|let|export|import|from|return|async|await|function|interface|type|if|else|true|false|null|class|new)\b|\b\d+(?:\.\d+)?\b)/g,
@@ -94,24 +95,62 @@ export function Editor({
     [draft, setDraft] = useState(""),
     [saving, setSaving] = useState(false),
     [showAll, setShowAll] = useState(false);
-  const dirty = edit && draft !== data?.after;
+  const dirty = edit && draft !== normalizeLines(data?.after || "");
+  const canEdit =
+    !!tab &&
+    !tab.commit &&
+    !tab.staged &&
+    !!data &&
+    !data.binary &&
+    !data.truncated &&
+    !loading &&
+    !error;
   const dirtyRef = useRef(false),
-    loadedTab = useRef("");
+    loadedTab = useRef(""),
+    loadGeneration = useRef(0),
+    savingRef = useRef(false),
+    contextRef = useRef(""),
+    focusPending = useRef(false),
+    textarea = useRef<HTMLTextAreaElement>(null),
+    gutter = useRef<HTMLPreElement>(null);
+  contextRef.current = `${repo}:${tab?.id || ""}`;
   dirtyRef.current = dirty;
-  useEffect(() => {
+  useLayoutEffect(() => {
     onDirty(dirty);
   }, [dirty, onDirty]);
+  useLayoutEffect(() => {
+    if (gutter.current && textarea.current) {
+      gutter.current.scrollTop = textarea.current.scrollTop;
+    }
+  }, [wrap, edit, loading]);
+  useEffect(() => {
+    if (edit && !loading && focusPending.current) {
+      textarea.current?.focus();
+      focusPending.current = false;
+    }
+  }, [edit, loading]);
   useEffect(() => {
     if (!tab || !repo) {
       setData(null);
+      setEdit(false);
+      setDraft("");
+      setLoading(false);
+      loadedTab.current = "";
+      focusPending.current = false;
       return;
     }
     if (dirtyRef.current && loadedTab.current === `${repo}:${tab.id}`) return;
     let current = true;
-    setLoading(true);
+    const generation = ++loadGeneration.current;
+    const changingTab = loadedTab.current !== `${repo}:${tab.id}`;
+    if (changingTab) {
+      setLoading(true);
+      setData(null);
+      setEdit(false);
+      setShowAll(false);
+      focusPending.current = tab.kind === "file";
+    }
     setError("");
-    setEdit(false);
-    setShowAll(false);
     const query =
       tab.kind === "diff"
         ? request<DiffData>("diff", repo, {
@@ -136,13 +175,26 @@ export function Editor({
           }));
     query
       .then((v) => {
-        if (current) {
+        if (
+          current &&
+          generation === loadGeneration.current &&
+          (changingTab || !dirtyRef.current)
+        ) {
           loadedTab.current = `${repo}:${tab.id}`;
           setData(v);
-          setDraft(v.after);
+          setDraft(normalizeLines(v.after));
+          if (v.binary || v.truncated || tab.commit || tab.staged)
+            setEdit(false);
+          else if (changingTab) setEdit(tab.kind === "file");
         }
       })
-      .catch((e) => current && setError(e.message))
+      .catch(
+        (e) =>
+          current &&
+          generation === loadGeneration.current &&
+          !dirtyRef.current &&
+          setError(e.message),
+      )
       .finally(() => current && setLoading(false));
     return () => {
       current = false;
@@ -179,16 +231,27 @@ export function Editor({
       });
   };
   const save = async () => {
-    if (!tab) return;
+    if (!tab || !canEdit || !dirty || savingRef.current) return;
+    const context = contextRef.current;
+    const text = data!.after.includes("\r\n")
+      ? draft.replaceAll("\n", "\r\n")
+      : draft;
+    savingRef.current = true;
+    ++loadGeneration.current;
     setSaving(true);
     try {
-      await request("saveFile", repo, { path: tab.path, text: draft });
-      setEdit(false);
+      await request("saveFile", repo, { path: tab.path, text });
+      if (contextRef.current === context) {
+        setData((current) => (current ? { ...current, after: text } : current));
+        setDraft(normalizeLines(text));
+        if (tab.kind === "diff") setEdit(false);
+      }
       onSaved();
       notify("文件已保存");
     } catch (e) {
       notify((e as Error).message, true);
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -207,6 +270,15 @@ export function Editor({
             <button title={t.path} onClick={() => onSelect(t.id)}>
               <FileIcon name={t.path} />
               <span>{t.path.split("/").at(-1)}</span>
+              {t.id === tab?.id && dirty && (
+                <span
+                  className="editor-dirty"
+                  aria-label="未保存的修改"
+                  title="未保存的修改"
+                >
+                  ●
+                </span>
+              )}
               {t.kind === "diff" && (
                 <GitCompareArrows size={12} className="muted" />
               )}
@@ -280,23 +352,31 @@ export function Editor({
               <WrapText size={15} />
             </IconButton>
             {!tab.commit && (
-              <IconButton
+              <button
+                className={`small editor-mode-button ${edit ? "active" : ""}`}
+                aria-label="编辑工作区文件"
+                aria-pressed={edit}
                 title="编辑工作区文件"
-                disabled={
-                  tab.staged || data?.binary || data?.truncated || loading
-                }
-                active={edit}
-                onClick={() => setEdit(!edit)}
+                disabled={!canEdit || saving}
+                onClick={() => {
+                  focusPending.current = true;
+                  setEdit(true);
+                  if (edit) {
+                    textarea.current?.focus();
+                    focusPending.current = false;
+                  }
+                }}
               >
                 <Edit3 size={14} />
-              </IconButton>
+                {edit ? "编辑中" : "编辑文件"}
+              </button>
             )}
             <IconButton
               title="复制文件内容"
               disabled={!data}
               onClick={() => {
                 navigator.clipboard
-                  .writeText(data?.after || "")
+                  .writeText(edit ? draft : data?.after || "")
                   .then(() => notify("已复制文件内容"))
                   .catch(() => notify("复制失败，请使用系统复制快捷键", true));
               }}
@@ -320,36 +400,76 @@ export function Editor({
           ) : edit ? (
             <div className="edit-area">
               <div className="edit-banner">
-                <span>编辑工作区 · {tab.path}</span>
+                <span>
+                  编辑工作区 · {tab.path}
+                  {dirty ? " · 未保存" : " · 已保存"}
+                </span>
                 <button
                   className="primary small"
-                  disabled={saving}
+                  disabled={saving || !dirty}
                   onClick={save}
                 >
-                  {saving ? <Spinner /> : <Save size={13} />}保存文件
+                  {saving ? <Spinner /> : <Save size={13} />}保存文件{" "}
+                  <kbd>Ctrl S</kbd>
                 </button>
                 <button
                   className="small"
+                  disabled={saving || !dirty}
                   onClick={() => {
-                    setDraft(data?.after || "");
-                    setEdit(false);
+                    setDraft(normalizeLines(data?.after || ""));
                   }}
                 >
-                  取消
+                  放弃修改
+                </button>
+                <button
+                  className="small"
+                  disabled={saving || dirty}
+                  onClick={() => setEdit(false)}
+                >
+                  阅读模式
                 </button>
               </div>
-              <textarea
-                aria-label="文件内容"
-                spellCheck={false}
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if ((e.ctrlKey || e.metaKey) && e.key === "s") {
-                    e.preventDefault();
-                    void save();
-                  }
-                }}
-              />
+              <div className={`edit-body ${wrap ? "wrap-code" : ""}`}>
+                {!wrap && (
+                  <pre
+                    ref={gutter}
+                    className="edit-line-numbers"
+                    aria-hidden="true"
+                  >
+                    {Array.from(
+                      { length: draft.split("\n").length },
+                      (_, i) => i + 1,
+                    ).join("\n")}
+                  </pre>
+                )}
+                <textarea
+                  ref={textarea}
+                  aria-label="文件内容"
+                  aria-busy={saving}
+                  readOnly={saving}
+                  wrap={wrap ? "soft" : "off"}
+                  spellCheck={false}
+                  value={draft}
+                  onScroll={(event) => {
+                    if (gutter.current)
+                      gutter.current.scrollTop = event.currentTarget.scrollTop;
+                  }}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+                      e.preventDefault();
+                      void save();
+                    }
+                  }}
+                />
+              </div>
+              <div className="editor-footer">
+                <span>{dirty ? "有未保存的修改" : "所有修改已保存"}</span>
+                <span className="spacer" />
+                <span>{draft.split("\n").length} 行</span>
+                <span>UTF-8</span>
+                <span>{data?.after.includes("\r\n") ? "CRLF" : "LF"}</span>
+              </div>
             </div>
           ) : (
             <>

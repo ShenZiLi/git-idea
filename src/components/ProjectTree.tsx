@@ -57,8 +57,10 @@ function Directory({
         return (
           <div key={entry.path}>
             <button
-              title={entry.path}
-              className={`tree-row ${active === entry.path ? "selected" : ""} ${change ? (change.conflict ? "conflicted" : change.index === "?" ? "untracked" : "modified") : ""}`}
+              title={`${entry.path}${entry.ignored ? "（Git 已忽略）" : ""}`}
+              className={`tree-row ${active === entry.path ? "selected" : ""} ${entry.ignored ? "ignored" : change ? (change.conflict ? "conflicted" : change.index === "?" ? "untracked" : "modified") : ""}`}
+              data-ignored={entry.ignored || undefined}
+              aria-expanded={entry.directory ? open : undefined}
               style={{ paddingLeft: 12 + depth * 17 }}
               onClick={() =>
                 entry.directory
