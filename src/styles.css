@@ -2488,19 +2488,43 @@ button.primary {
   padding: 8px 8px 6px;
 }
 .tool-rail {
+  width: 40px;
   border: 1px solid var(--glass-edge);
   border-radius: 13px;
   background: var(--glass-reflection), var(--glass-fill);
   box-shadow: var(--panel-shadow);
 }
 .tool-rail .icon-button {
-  border-radius: 8px;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  padding: 0;
+  border-radius: 6px;
+  color: var(--muted);
 }
 .tool-rail .icon-button.active {
   background: var(--selection);
+  color: var(--blue);
   box-shadow:
     inset 2px 0 var(--blue),
     inset 0 1px 0 var(--glass-highlight);
+}
+.sidebar-icon {
+  display: block;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  background-color: currentColor;
+  mask-mode: luminance;
+  mask-repeat: no-repeat;
+  mask-size: 400% 300%;
+  pointer-events: none;
+  forced-color-adjust: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  .tool-rail .icon-button:hover:not(:disabled):not(.active) {
+    color: var(--text);
+  }
 }
 .workbench,
 .upper-grid,

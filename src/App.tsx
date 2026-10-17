@@ -4,7 +4,6 @@ import {
   ArrowDown,
   ArrowDownToLine,
   ArrowUp,
-  Bell,
   BookOpen,
   Check,
   ChevronDown,
@@ -14,27 +13,21 @@ import {
   Database,
   Download,
   FileDiff,
-  Files,
   FolderGit2,
   FolderOpen,
   GitBranch,
-  GitCommitHorizontal,
   GitMerge,
   GitPullRequestArrow,
   LayoutPanelLeft,
-  ListFilter,
   Maximize2,
   Menu,
   Minus,
-  Moon,
   MoreHorizontal,
   Plus,
   RefreshCw,
   Search,
   Settings,
   Square,
-  Sun,
-  Terminal,
   Upload,
   X,
 } from "lucide-react";
@@ -49,6 +42,7 @@ import type {
 import { normalizeUiScale, UI_SCALE_OPTIONS } from "../shared/types";
 import { request } from "./api";
 import { ProjectTree } from "./components/ProjectTree";
+import { SidebarIcon } from "./components/SidebarIcon";
 import { CommitPanel } from "./components/CommitPanel";
 import { Editor, type EditorTab } from "./components/Editor";
 import { BranchPanel } from "./components/BranchPanel";
@@ -969,21 +963,21 @@ export default function App() {
             active={projectVisible}
             onClick={() => setProjectVisible(!projectVisible)}
           >
-            <Files size={19} />
+            <SidebarIcon name="project" />
           </IconButton>
           <IconButton
             title="提交（Ctrl K）"
             active={commitVisible}
             onClick={() => setCommitVisible(!commitVisible)}
           >
-            <GitCommitHorizontal size={19} />
+            <SidebarIcon name="commit" />
           </IconButton>
           <IconButton
             title="分支"
             disabled={!snapshot}
             onClick={() => setSwitcher(true)}
           >
-            <GitBranch size={19} />
+            <SidebarIcon name="branch" />
           </IconButton>
           <span className="rail-spacer" />
           <IconButton
@@ -997,7 +991,7 @@ export default function App() {
               }
             }}
           >
-            <GitMerge size={19} />
+            <SidebarIcon name="log" />
           </IconButton>
           <IconButton
             title="Git 控制台"
@@ -1008,10 +1002,10 @@ export default function App() {
               void request<CommandLog[]>("logs").then(setLogs);
             }}
           >
-            <Terminal size={18} />
+            <SidebarIcon name="terminal" />
           </IconButton>
           <IconButton title="帮助" onClick={() => setHelp(true)}>
-            <CircleHelp size={17} />
+            <SidebarIcon name="help" />
           </IconButton>
         </nav>
         <main
@@ -1196,23 +1190,24 @@ export default function App() {
             active={commitVisible}
             onClick={() => setCommitVisible(!commitVisible)}
           >
-            <ListFilter size={19} />
+            <SidebarIcon name="changes" />
           </IconButton>
           <IconButton
             title="通知"
             active={!!toast}
             onClick={() => notify(status)}
           >
-            <Bell size={18} />
+            <SidebarIcon name="notification" />
           </IconButton>
           <IconButton
             title="储藏记录"
+            active={logVisible && bottomTab === "stash"}
             onClick={() => {
               setLogVisible(true);
               setBottomTab("stash");
             }}
           >
-            <Archive size={18} />
+            <SidebarIcon name="stash" />
           </IconButton>
           <span className="rail-spacer" />
           <IconButton
@@ -1226,8 +1221,8 @@ export default function App() {
           >
             <IconSwap
               active={theme === "dark"}
-              on={<Sun size={17} />}
-              off={<Moon size={17} />}
+              on={<SidebarIcon name="sun" />}
+              off={<SidebarIcon name="moon" />}
             />
           </IconButton>
         </nav>
