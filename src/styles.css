@@ -574,36 +574,9 @@ hr {
 .panel-toolbar > .tiny {
   margin-left: 5px;
 }
-.panel-foot {
-  min-height: 25px;
-  border-top: 1px solid var(--subtle-border);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 11px;
-  font-size: 10px;
-  color: var(--faint);
-}
 .project-panel {
   display: flex;
   flex-direction: column;
-}
-.project-scope {
-  height: 31px;
-  flex-shrink: 0;
-  padding: 0 12px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--muted);
-}
-.project-scope > .tiny {
-  margin-left: auto;
-  max-width: 90px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .tree-scroll {
   overflow: auto;

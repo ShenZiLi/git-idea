@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  ChevronDown,
   ChevronRight,
   ChevronsDownUp,
   Crosshair,
@@ -223,11 +222,6 @@ export function ProjectTree({
           <Crosshair size={15} />
         </IconButton>
       </PanelHeader>
-      <div className="project-scope">
-        <span>项目文件</span>
-        <ChevronDown size={12} />
-        <span className="tiny muted">{name}</span>
-      </div>
       {repo ? (
         <div className="tree-scroll">
           <button className="tree-root" onClick={() => setRootOpen(!rootOpen)}>
@@ -254,10 +248,6 @@ export function ProjectTree({
       ) : (
         <Empty title="尚未打开仓库" />
       )}
-      <div className="panel-foot">
-        <span className="status-dot" />
-        本地文件系统
-      </div>
     </section>
   );
 }
