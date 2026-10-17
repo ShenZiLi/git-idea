@@ -493,6 +493,17 @@ export default function App() {
       title: "设置",
       description: "提交身份仅对当前仓库生效；外观设置会在本机保存。",
       fields: [
+        {
+          key: "theme",
+          label: "外观模式",
+          type: "theme",
+          value: theme,
+          options: [
+            { value: "light", label: "亮色模式" },
+            { value: "dark", label: "暗色模式" },
+          ],
+          hint: "液态玻璃外观 · 保存后应用，下次启动时保留。",
+        },
         ...(snapshot
           ? [
               {
@@ -510,15 +521,6 @@ export default function App() {
               },
             ]
           : []),
-        {
-          key: "theme",
-          label: "外观",
-          value: theme,
-          options: [
-            { value: "dark", label: "Darcula 深色" },
-            { value: "light", label: "IntelliJ 浅色" },
-          ],
-        },
         {
           key: "fontSize",
           label: "编辑器字号",

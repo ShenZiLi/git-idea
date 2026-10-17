@@ -11,8 +11,10 @@ import {
   Check,
   FolderOpen,
   GitBranch,
+  Moon,
   Plus,
   Search,
+  Sun,
   X,
 } from "lucide-react";
 import type { Branch, RepoSnapshot } from "../../shared/types";
@@ -64,7 +66,7 @@ export function Modal({
     const previous = document.activeElement as HTMLElement | null;
     const first =
       ref.current?.querySelector<HTMLElement>(
-        "input:not(:disabled),select:not(:disabled),textarea:not(:disabled)",
+        'input:not(:disabled):not([type="radio"]),input[type="radio"]:checked:not(:disabled),select:not(:disabled),textarea:not(:disabled)',
       ) || ref.current?.querySelector<HTMLElement>("button:not(:disabled)");
     first?.focus();
     const handler = (e: KeyboardEvent) => {
@@ -226,6 +228,7 @@ export function FormDialog({
   spec: FormSpec;
   onClose: () => void;
 }) {
+  const formId = useId();
   const [values, setValues] = useState<Record<string, string>>(
     Object.fromEntries(spec.fields.map((f) => [f.key, f.value || ""])),
   );
@@ -256,12 +259,74 @@ export function FormDialog({
         )}
         <div className="form-fields">
           {spec.fields.map((field) => (
-            <label className="field" key={field.key}>
-              <span>{field.label}</span>
+            <div className="field" key={field.key}>
+              {field.type === "theme" ? (
+                <span id={`${formId}-${field.key}-label`}>{field.label}</span>
+              ) : (
+                <label htmlFor={`${formId}-${field.key}`}>{field.label}</label>
+              )}
               <div className="field-control">
-                {field.options ? (
+                {field.type === "theme" ? (
+                  <div
+                    className="theme-choices"
+                    role="radiogroup"
+                    aria-labelledby={`${formId}-${field.key}-label`}
+                    aria-describedby={
+                      field.hint ? `${formId}-${field.key}-hint` : undefined
+                    }
+                  >
+                    {field.options?.map((option) => (
+                      <label
+                        className={`theme-option ${values[field.key] === option.value ? "selected" : ""}`}
+                        key={option.value}
+                      >
+                        <input
+                          type="radio"
+                          name={`${formId}-${field.key}`}
+                          aria-label={option.label}
+                          value={option.value}
+                          checked={values[field.key] === option.value}
+                          disabled={busy}
+                          onChange={() =>
+                            setValues({ ...values, [field.key]: option.value })
+                          }
+                        />
+                        <span
+                          className="theme-preview"
+                          data-mode={option.value}
+                          aria-hidden="true"
+                        >
+                          <span className="theme-preview-window">
+                            <span className="theme-preview-bar" />
+                            <span className="theme-preview-sidebar" />
+                            <span className="theme-preview-code">
+                              <i />
+                              <i />
+                              <i />
+                            </span>
+                          </span>
+                        </span>
+                        <span className="theme-option-caption">
+                          {option.value === "dark" ? (
+                            <Moon size={15} aria-hidden="true" />
+                          ) : (
+                            <Sun size={15} aria-hidden="true" />
+                          )}
+                          <span>{option.label}</span>
+                          {values[field.key] === option.value && (
+                            <Check size={15} aria-hidden="true" />
+                          )}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                ) : field.options ? (
                   <select
+                    id={`${formId}-${field.key}`}
                     aria-label={field.label}
+                    aria-describedby={
+                      field.hint ? `${formId}-${field.key}-hint` : undefined
+                    }
                     value={values[field.key]}
                     onChange={(e) =>
                       setValues({ ...values, [field.key]: e.target.value })
@@ -275,7 +340,11 @@ export function FormDialog({
                   </select>
                 ) : (
                   <input
+                    id={`${formId}-${field.key}`}
                     aria-label={field.label}
+                    aria-describedby={
+                      field.hint ? `${formId}-${field.key}-hint` : undefined
+                    }
                     type={field.type || "text"}
                     value={values[field.key]}
                     required={field.required !== false}
@@ -298,8 +367,12 @@ export function FormDialog({
                   </IconButton>
                 )}
               </div>
-              {field.hint && <small className="muted">{field.hint}</small>}
-            </label>
+              {field.hint && (
+                <small id={`${formId}-${field.key}-hint`} className="muted">
+                  {field.hint}
+                </small>
+              )}
+            </div>
           ))}
         </div>
         {error && (
