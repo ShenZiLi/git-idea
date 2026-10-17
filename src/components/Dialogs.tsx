@@ -33,17 +33,31 @@ export interface FormField {
   options?: { value: string; label: string }[];
   browse?: boolean;
   hint?: string;
-  applyOnBlur?: boolean;
 }
-export interface FormSpec {
+interface FormBase {
   title: string;
   description?: string;
   fields: FormField[];
-  submitLabel?: string;
-  onSubmit?: (values: Record<string, string>) => Promise<boolean>;
-  onChange?: (key: string, values: Record<string, string>) => Promise<void>;
   danger?: boolean;
 }
+export type FormSpec = FormBase &
+  (
+    | {
+        mode: "instant";
+        onChange: (
+          key: string,
+          values: Record<string, string>,
+        ) => Promise<void>;
+        onSubmit?: never;
+        submitLabel?: never;
+      }
+    | {
+        mode?: "submit";
+        onSubmit: (values: Record<string, string>) => Promise<boolean>;
+        submitLabel: string;
+        onChange?: never;
+      }
+  );
 export interface ConfirmSpec {
   title: string;
   message: string;
@@ -280,7 +294,8 @@ export function FormDialog({
   const revisions = useRef<Record<string, number>>({});
   function apply(key: string) {
     const next = { ...currentValues.current };
-    if (!spec.onChange || requestedValues.current[key] === next[key]) return;
+    if (spec.mode !== "instant" || requestedValues.current[key] === next[key])
+      return;
     requestedValues.current[key] = next[key];
     const revision = (revisions.current[key] || 0) + 1;
     revisions.current[key] = revision;
@@ -300,19 +315,15 @@ export function FormDialog({
     currentValues.current = { ...currentValues.current, [field.key]: value };
     setValues(currentValues.current);
     setError("");
-    if (!field.applyOnBlur) apply(field.key);
+    apply(field.key);
   }
   function close() {
     if (busy) return;
-    if (spec.onChange) (document.activeElement as HTMLElement | null)?.blur();
     onClose();
   }
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!spec.onSubmit) {
-      (document.activeElement as HTMLElement | null)?.blur();
-      return;
-    }
+    if (spec.mode === "instant") return;
     setBusy(true);
     setError("");
     try {
@@ -418,9 +429,6 @@ export function FormDialog({
                     required={field.required !== false}
                     placeholder={field.placeholder}
                     onChange={(e) => change(field, e.target.value)}
-                    onBlur={() => {
-                      if (field.applyOnBlur) apply(field.key);
-                    }}
                   />
                 )}
                 {field.browse && window.gitIdea && (
@@ -449,7 +457,7 @@ export function FormDialog({
             {error}
           </div>
         )}
-        {spec.onChange ? (
+        {spec.mode === "instant" ? (
           <div className="modal-footer settings-save-status" role="status">
             {pending > 0
               ? "正在自动保存…"

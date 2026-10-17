@@ -498,7 +498,9 @@ export default function App() {
     };
     setForm({
       title: "设置",
-      description: "外观更改立即生效并自动保存；提交身份仅对当前仓库生效。",
+      mode: "instant",
+      description:
+        "更改立即生效并自动保存，无需点击保存；提交身份仅对当前仓库生效。",
       fields: [
         {
           key: "theme",
@@ -528,8 +530,7 @@ export default function App() {
                 label: "提交者姓名",
                 value: snapshot.identity.name,
                 required: false,
-                applyOnBlur: true,
-                hint: "输入完成后自动保存。姓名和邮箱需同时填写完整。",
+                hint: "输入合法后立即自动保存。姓名和邮箱需同时填写完整。",
               },
               {
                 key: "email",
@@ -537,8 +538,7 @@ export default function App() {
                 value: snapshot.identity.email,
                 type: "email",
                 required: false,
-                applyOnBlur: true,
-                hint: "输入完成后自动保存，仅用于当前仓库。",
+                hint: "输入合法后立即自动保存，仅用于当前仓库。",
               },
             ]
           : []),
