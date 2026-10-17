@@ -31,13 +31,15 @@ export interface FormField {
   options?: { value: string; label: string }[];
   browse?: boolean;
   hint?: string;
+  applyOnBlur?: boolean;
 }
 export interface FormSpec {
   title: string;
   description?: string;
   fields: FormField[];
-  submitLabel: string;
-  onSubmit: (values: Record<string, string>) => Promise<boolean>;
+  submitLabel?: string;
+  onSubmit?: (values: Record<string, string>) => Promise<boolean>;
+  onChange?: (key: string, values: Record<string, string>) => Promise<void>;
   danger?: boolean;
 }
 export interface ConfirmSpec {
@@ -234,8 +236,45 @@ export function FormDialog({
   );
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
+  const [pending, setPending] = useState(0);
+  const currentValues = useRef(values);
+  const requestedValues = useRef({ ...values });
+  const revisions = useRef<Record<string, number>>({});
+  function apply(key: string) {
+    const next = { ...currentValues.current };
+    if (!spec.onChange || requestedValues.current[key] === next[key]) return;
+    requestedValues.current[key] = next[key];
+    const revision = (revisions.current[key] || 0) + 1;
+    revisions.current[key] = revision;
+    setError("");
+    setPending((count) => count + 1);
+    void spec
+      .onChange(key, next)
+      .catch((cause: Error) => {
+        if (revisions.current[key] === revision) {
+          delete requestedValues.current[key];
+          setError(cause.message);
+        }
+      })
+      .finally(() => setPending((count) => count - 1));
+  }
+  function change(field: FormField, value: string) {
+    currentValues.current = { ...currentValues.current, [field.key]: value };
+    setValues(currentValues.current);
+    setError("");
+    if (!field.applyOnBlur) apply(field.key);
+  }
+  function close() {
+    if (busy) return;
+    if (spec.onChange) (document.activeElement as HTMLElement | null)?.blur();
+    onClose();
+  }
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (!spec.onSubmit) {
+      (document.activeElement as HTMLElement | null)?.blur();
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -247,12 +286,7 @@ export function FormDialog({
     }
   }
   return (
-    <Modal
-      title={spec.title}
-      onClose={() => {
-        if (!busy) onClose();
-      }}
-    >
+    <Modal title={spec.title} onClose={close}>
       <form onSubmit={submit}>
         {spec.description && (
           <p className="modal-description">{spec.description}</p>
@@ -287,9 +321,7 @@ export function FormDialog({
                           value={option.value}
                           checked={values[field.key] === option.value}
                           disabled={busy}
-                          onChange={() =>
-                            setValues({ ...values, [field.key]: option.value })
-                          }
+                          onChange={() => change(field, option.value)}
                         />
                         <span
                           className="theme-preview"
@@ -328,9 +360,7 @@ export function FormDialog({
                       field.hint ? `${formId}-${field.key}-hint` : undefined
                     }
                     value={values[field.key]}
-                    onChange={(e) =>
-                      setValues({ ...values, [field.key]: e.target.value })
-                    }
+                    onChange={(e) => change(field, e.target.value)}
                   >
                     {field.options.map((o) => (
                       <option key={o.value} value={o.value}>
@@ -349,9 +379,10 @@ export function FormDialog({
                     value={values[field.key]}
                     required={field.required !== false}
                     placeholder={field.placeholder}
-                    onChange={(e) =>
-                      setValues({ ...values, [field.key]: e.target.value })
-                    }
+                    onChange={(e) => change(field, e.target.value)}
+                    onBlur={() => {
+                      if (field.applyOnBlur) apply(field.key);
+                    }}
                   />
                 )}
                 {field.browse && window.gitIdea && (
@@ -360,7 +391,7 @@ export function FormDialog({
                     type="button"
                     onClick={async () => {
                       const path = await window.gitIdea!.chooseDirectory();
-                      if (path) setValues({ ...values, [field.key]: path });
+                      if (path) change(field, path);
                     }}
                   >
                     <FolderOpen size={16} />
@@ -380,19 +411,29 @@ export function FormDialog({
             {error}
           </div>
         )}
-        <div className="modal-footer">
-          <button type="button" disabled={busy} onClick={onClose}>
-            取消
-          </button>
-          <button
-            className={spec.danger ? "danger" : "primary"}
-            type="submit"
-            disabled={busy}
-          >
-            {busy && <Spinner />}
-            {busy ? "正在执行…" : spec.submitLabel}
-          </button>
-        </div>
+        {spec.onChange ? (
+          <div className="modal-footer settings-save-status" role="status">
+            {pending > 0
+              ? "正在自动保存…"
+              : error
+                ? "部分设置未保存"
+                : "更改立即生效并自动保存"}
+          </div>
+        ) : (
+          <div className="modal-footer">
+            <button type="button" disabled={busy} onClick={onClose}>
+              取消
+            </button>
+            <button
+              className={spec.danger ? "danger" : "primary"}
+              type="submit"
+              disabled={busy}
+            >
+              {busy && <Spinner />}
+              {busy ? "正在执行…" : spec.submitLabel}
+            </button>
+          </div>
+        )}
       </form>
     </Modal>
   );

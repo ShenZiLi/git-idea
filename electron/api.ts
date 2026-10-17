@@ -24,6 +24,7 @@ export function createApi(
     options.preferencesPath ||
     path.join(os.homedir(), ".git-idea", "preferences.json");
   let preferences: Preferences | undefined;
+  let preferenceWrites = Promise.resolve();
   async function prefs() {
     if (!preferences) {
       try {
@@ -37,11 +38,19 @@ export function createApi(
     }
     return preferences!;
   }
-  async function save(values: Partial<Preferences>) {
-    preferences = { ...(await prefs()), ...values };
-    await fs.mkdir(path.dirname(preferencesPath), { recursive: true });
-    await fs.writeFile(preferencesPath, JSON.stringify(preferences, null, 2));
-    return preferences;
+  function save(values: Partial<Preferences>) {
+    const writing = preferenceWrites.then(async () => {
+      const next = { ...(await prefs()), ...values };
+      await fs.mkdir(path.dirname(preferencesPath), { recursive: true });
+      await fs.writeFile(preferencesPath, JSON.stringify(next, null, 2));
+      preferences = next;
+      return next;
+    });
+    preferenceWrites = writing.then(
+      () => {},
+      () => {},
+    );
+    return writing;
   }
   async function remember(root: string) {
     const current = await prefs();

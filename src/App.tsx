@@ -127,6 +127,7 @@ export default function App() {
     }
   });
   const workbench = useRef<HTMLDivElement>(null),
+    identityWrites = useRef<Promise<void>>(Promise.resolve()),
     refreshSequence = useRef(0),
     repoRef = useRef(""),
     filtersRef = useRef(filters),
@@ -486,9 +487,18 @@ export default function App() {
   }
   function settings() {
     setMainMenu(false);
+    const settingsRepo = repoRef.current;
+    const persist = async (writing: Promise<unknown>) => {
+      try {
+        await writing;
+      } catch (error) {
+        notify(`设置未保存：${(error as Error).message}`, true);
+        throw error;
+      }
+    };
     setForm({
       title: "设置",
-      description: "提交身份仅对当前仓库生效；外观设置会在本机保存。",
+      description: "外观更改立即生效并自动保存；提交身份仅对当前仓库生效。",
       fields: [
         {
           key: "theme",
@@ -499,7 +509,7 @@ export default function App() {
             { value: "light", label: "亮色模式" },
             { value: "dark", label: "暗色模式" },
           ],
-          hint: "液态玻璃外观 · 保存后应用，下次启动时保留。",
+          hint: "液态玻璃外观 · 选择后立即应用，下次启动时保留。",
         },
         {
           key: "uiScale",
@@ -509,7 +519,7 @@ export default function App() {
             value: String(percent),
             label: `${percent}%`,
           })),
-          hint: "统一调整文字、图标和所有面板的大小；100% 为默认大小，保存后应用。",
+          hint: "统一调整文字、图标和所有面板的大小；选择后立即应用，默认 100%。",
         },
         ...(snapshot
           ? [
@@ -518,6 +528,8 @@ export default function App() {
                 label: "提交者姓名",
                 value: snapshot.identity.name,
                 required: false,
+                applyOnBlur: true,
+                hint: "输入完成后自动保存。姓名和邮箱需同时填写完整。",
               },
               {
                 key: "email",
@@ -525,6 +537,8 @@ export default function App() {
                 value: snapshot.identity.email,
                 type: "email",
                 required: false,
+                applyOnBlur: true,
+                hint: "输入完成后自动保存，仅用于当前仓库。",
               },
             ]
           : []),
@@ -554,36 +568,40 @@ export default function App() {
           hint: "用于文件编辑、代码阅读与差异视图；未安装的字体会使用默认字体。",
         },
       ],
-      submitLabel: "保存设置",
-      onSubmit: async (values) => {
-        const identityChanged =
-          snapshot &&
-          (values.name !== snapshot.identity.name ||
-            values.email !== snapshot.identity.email);
-        if (identityChanged && (!values.name.trim() || !values.email.trim())) {
-          throw new Error("修改提交身份时，请同时填写提交者姓名和邮箱。");
+      onChange: async (key, values) => {
+        if (key === "name" || key === "email") {
+          const identity = {
+            name: values.name.trim(),
+            email: values.email.trim(),
+          };
+          if (!identity.name || !identity.email)
+            throw new Error("请同时填写提交者姓名和邮箱后自动保存。");
+          if (!/^[^\s@]+@[^\s@]+$/.test(identity.email))
+            throw new Error("请填写有效的提交者邮箱。");
+          const writing = identityWrites.current.then(async () => {
+            await request("mutate", settingsRepo, {
+              action: "identity",
+              ...identity,
+            });
+            if (repoRef.current === settingsRepo)
+              setSnapshot((current) =>
+                current ? { ...current, identity } : current,
+              );
+          });
+          identityWrites.current = writing.catch(() => {});
+          await persist(writing);
+          return;
         }
-        if (
-          identityChanged &&
-          !(await mutate("identity", {
-            name: values.name,
-            email: values.email,
-          }))
-        )
-          return false;
-        await request("preferences", undefined, {
-          theme: values.theme,
-          uiScale: Number(values.uiScale),
-          fontSize: Number(values.fontSize),
-          uiFontFamily: values.uiFontFamily.trim(),
-          editorFontFamily: values.editorFontFamily.trim(),
-        });
-        setTheme(values.theme);
-        setUiScale(normalizeUiScale(Number(values.uiScale)));
-        setFontSize(Number(values.fontSize));
-        setUiFontFamily(values.uiFontFamily.trim());
-        setEditorFontFamily(values.editorFontFamily.trim());
-        return true;
+        const value =
+          key === "fontSize" || key === "uiScale"
+            ? Number(values[key])
+            : values[key].trim();
+        if (key === "theme") setTheme(String(value));
+        else if (key === "uiScale") setUiScale(normalizeUiScale(value));
+        else if (key === "fontSize") setFontSize(Number(value));
+        else if (key === "uiFontFamily") setUiFontFamily(String(value));
+        else if (key === "editorFontFamily") setEditorFontFamily(String(value));
+        await persist(request("preferences", undefined, { [key]: value }));
       },
     });
   }

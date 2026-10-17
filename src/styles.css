@@ -2121,6 +2121,11 @@ hr {
   min-width: 76px;
   font-size: 12px;
 }
+.settings-save-status {
+  justify-content: flex-start;
+  color: var(--muted);
+  font-size: 11px;
+}
 .form-error {
   padding: 4px 0;
   color: var(--red);
