@@ -11,6 +11,9 @@ export interface Commit {
   author: string;
   email: string;
   date: string;
+  committer?: string;
+  committerEmail?: string;
+  commitDate?: string;
   subject: string;
   refs: string;
   body: string;

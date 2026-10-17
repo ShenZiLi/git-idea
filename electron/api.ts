@@ -7,6 +7,9 @@ import {
   diff,
   git,
   history,
+  logLocate,
+  logPeople,
+  logResolve,
   mutate,
   readFile,
   repository,
@@ -63,6 +66,13 @@ export function createApi(
   return async function request(request: ApiRequest): Promise<unknown> {
     if (!request || typeof request.method !== "string")
       throw new Error("无效请求");
+    if (
+      request.params !== undefined &&
+      (!request.params ||
+        typeof request.params !== "object" ||
+        Array.isArray(request.params))
+    )
+      throw new Error("无效的请求参数");
     const p = request.params || {};
     if (request.method === "bootstrap")
       return {
@@ -112,6 +122,12 @@ export function createApi(
         return snapshot(repo, p);
       case "history":
         return history(repo, p);
+      case "logPeople":
+        return logPeople(repo);
+      case "logResolve":
+        return logResolve(repo, p);
+      case "logLocate":
+        return logLocate(repo, p);
       case "tree":
         return tree(repo, String(p.path || ""));
       case "file":

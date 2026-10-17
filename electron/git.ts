@@ -3,6 +3,8 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { lineChanges } from "../shared/line-changes.ts";
+import { LOG_MAX_COUNT, LOG_PAGE_SIZE } from "../shared/log.ts";
+import type { LogLocation, LogPerson } from "../shared/log.ts";
 import type {
   Branch,
   Change,
@@ -212,22 +214,28 @@ async function exists(file: string) {
   }
 }
 async function hasHead(repo: string) {
-  try {
-    await git(repo, ["rev-parse", "--verify", "HEAD"]);
-    return true;
-  } catch {
-    return false;
-  }
+  return Boolean(
+    (
+      await git(
+        repo,
+        ["rev-parse", "--verify", "--quiet", "HEAD"],
+        undefined,
+        [0, 1],
+      )
+    ).trim(),
+  );
 }
 async function config(repo: string, key: string) {
-  try {
-    return (await git(repo, ["config", "--get", key])).trim();
-  } catch {
-    return "";
-  }
+  return (await git(repo, ["config", "--get", key], undefined, [0, 1])).trim();
 }
 export async function resolveCommit(repo: string, ref: string) {
-  if (!ref || ref.startsWith("-") || ref.includes("\0") || ref.length > 500)
+  if (
+    typeof ref !== "string" ||
+    !ref ||
+    ref.startsWith("-") ||
+    ref.includes("\0") ||
+    ref.length > 500
+  )
     throw new Error("无效的 Git 引用");
   return (
     await git(repo, [
@@ -266,74 +274,320 @@ function parseLog(raw: string): Commit[] {
     .map((row) => row.replace(/^\s+/, ""))
     .filter(Boolean)
     .map((row) => {
-      const [hash, parents, author, email, date, subject, refs, body] =
-        row.split("\0");
+      const [
+        hash,
+        parents,
+        author,
+        email,
+        date,
+        committer,
+        committerEmail,
+        commitDate,
+        subject,
+        refs,
+        body,
+      ] = row.split("\0");
       return {
         hash,
         parents: parents ? parents.split(" ") : [],
         author,
         email,
         date,
+        committer,
+        committerEmail,
+        commitDate,
         subject,
         refs,
         body: (body ?? "").trim(),
       };
     });
 }
-const logFormat = "%H%x00%P%x00%an%x00%ae%x00%aI%x00%s%x00%D%x00%b%x1e";
+const logFormat =
+  "%H%x00%P%x00%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI%x00%s%x00%D%x00%b%x1e";
+
+function logText(params: Record<string, unknown>, key: string, max = 4096) {
+  if (!params || typeof params !== "object" || Array.isArray(params))
+    throw new Error("无效的日志筛选");
+  const value = params[key];
+  if (value === undefined) return "";
+  if (typeof value !== "string" || value.includes("\0") || value.length > max)
+    throw new Error(`无效的日志筛选 ${key}`);
+  return value;
+}
+
+function logList(
+  params: Record<string, unknown>,
+  key: string,
+  maxLength: number,
+) {
+  const values = params[key];
+  if (values === undefined) return [];
+  if (!Array.isArray(values) || values.length > 100)
+    throw new Error(`日志筛选 ${key} 最多允许 100 项`);
+  return [
+    ...new Set(
+      values.map((value) => {
+        if (
+          typeof value !== "string" ||
+          !value ||
+          value.includes("\0") ||
+          value.length > maxLength
+        )
+          throw new Error(`无效的日志筛选 ${key}`);
+        return value;
+      }),
+    ),
+  ];
+}
+
+function logLimit(params: Record<string, unknown>) {
+  if (params.limit === undefined) return LOG_PAGE_SIZE;
+  if (
+    typeof params.limit !== "number" ||
+    !Number.isFinite(params.limit) ||
+    params.limit < 1
+  )
+    throw new Error("日志加载数量必须是正数");
+  return Math.min(Math.floor(params.limit), LOG_MAX_COUNT);
+}
+
+function logDay(value: string, end: boolean) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value))
+    throw new Error("日期格式必须是 YYYY-MM-DD");
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(0);
+  date.setFullYear(year, month - 1, day);
+  date.setHours(0, 0, 0, 0);
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  )
+    throw new Error(`无效的日期：${value}`);
+  if (end) {
+    date.setDate(date.getDate() + 1);
+    date.setSeconds(date.getSeconds() - 1);
+  }
+  return date.toISOString();
+}
+
+function escapeLogRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+async function logRevisions(repo: string, refs: string[]): Promise<string[]> {
+  const headExists = await hasHead(repo);
+  if (refs.length) {
+    const revisions: string[] = [];
+    for (const ref of refs) {
+      if (ref.startsWith("-") || ref.length > 500)
+        throw new Error("无效的 Git 引用");
+      if (ref === "HEAD" && !headExists) continue;
+      // A branch can disappear between the tree refresh and its history request.
+      if (/^refs\/(heads|remotes|tags)\//.test(ref)) {
+        const existing = await git(
+          repo,
+          ["rev-parse", "--verify", "--quiet", "--end-of-options", ref],
+          undefined,
+          [0, 1],
+        );
+        if (!existing.trim()) continue;
+      }
+      revisions.push(await resolveCommit(repo, ref));
+    }
+    return [...new Set(revisions)];
+  }
+  if (
+    !headExists &&
+    !(
+      await git(repo, [
+        "for-each-ref",
+        "--count=1",
+        "--format=%(refname)",
+        "refs/heads",
+        "refs/remotes",
+        "refs/tags",
+      ])
+    ).trim()
+  )
+    return [];
+  // Stashes and private application refs are not branch history.
+  return ["--branches", "--remotes", "--tags", ...(headExists ? ["HEAD"] : [])];
+}
+
+async function logQuery(repo: string, params: Record<string, unknown>) {
+  if (!params || typeof params !== "object" || Array.isArray(params))
+    throw new Error("无效的日志筛选");
+  const search = logText(params, "search");
+  const ref = logText(params, "ref", 500);
+  const author = logText(params, "author", 512);
+  const file = logText(params, "file");
+  const refs = [
+    ...new Set([...logList(params, "refs", 500), ...(ref ? [ref] : [])]),
+  ];
+  const authors = logList(params, "authors", 512);
+  const paths = [
+    ...new Set([...logList(params, "paths", 4096), ...(file ? [file] : [])]),
+  ];
+  if (
+    refs.length > 100 ||
+    authors.length + Number(Boolean(author)) > 100 ||
+    paths.length > 100
+  )
+    throw new Error("每类日志筛选最多允许 100 项");
+  for (const key of ["regex", "matchCase", "firstParent", "noMerges"])
+    if (params[key] !== undefined && typeof params[key] !== "boolean")
+      throw new Error(`无效的日志选项 ${key}`);
+  if (
+    params.order !== undefined &&
+    params.order !== "date" &&
+    params.order !== "topo"
+  )
+    throw new Error("不支持的日志排序");
+  const since = logText(params, "since", 10);
+  const until = logText(params, "until", 10);
+  const sinceDate = since ? logDay(since, false) : "";
+  const untilDate = until ? logDay(until, true) : "";
+  if (sinceDate && untilDate && Date.parse(sinceDate) > Date.parse(untilDate))
+    throw new Error("开始日期不能晚于结束日期");
+  const literal = (value: string) =>
+    params.regex ? escapeLogRegex(value) : value;
+  const args = [
+    params.order === "topo" ? "--topo-order" : "--date-order",
+    params.regex ? "--extended-regexp" : "--fixed-strings",
+    ...(params.matchCase ? [] : ["--regexp-ignore-case"]),
+    ...(params.firstParent ? ["--first-parent"] : []),
+    ...(params.noMerges ? ["--no-merges"] : []),
+    ...(author ? [`--author=${literal(author)}`] : []),
+    ...authors.map((email) => `--author=${literal(`<${email}>`)}`),
+    ...(sinceDate ? [`--since-as-filter=${sinceDate}`] : []),
+    ...(untilDate ? [`--until=${untilDate}`] : []),
+  ];
+  const pathspecs = paths.map((file) => {
+    if (file.split(/[\\/]/).includes(".."))
+      throw new Error("日志路径不能包含上级目录 ..");
+    return relativeFile(repo, file) || ".";
+  });
+  const revisions = await logRevisions(repo, refs);
+  return { args, revisions, pathspecs, search, limit: logLimit(params) };
+}
+
+async function historyPage(repo: string, params: Record<string, unknown>) {
+  const { args, revisions, pathspecs, search, limit } = await logQuery(
+    repo,
+    params,
+  );
+  if (!revisions.length) return { commits: [], hasMore: false };
+  const paths = pathspecs.length ? ["--", ...pathspecs] : [];
+  let hash = "";
+  if (search && /^[a-f0-9]{4,64}$/i.test(search)) {
+    try {
+      hash = await resolveCommit(repo, search);
+    } catch {
+      // A hexadecimal subject can also be ordinary message text.
+    }
+  }
+  if (hash) {
+    // Keep the same Git walk and every filter for hash searches, including first-parent.
+    const matches = await git(repo, [
+      "log",
+      ...args,
+      "--format=%H",
+      ...revisions,
+      ...paths,
+    ]);
+    const found = matches.split(/\r?\n/).includes(hash);
+    return {
+      commits: found ? [await logResolve(repo, { ref: hash })] : [],
+      hasMore: false,
+    };
+  }
+  const commits = parseLog(
+    await git(repo, [
+      "log",
+      ...args,
+      `--format=${logFormat}`,
+      `--max-count=${limit + 1}`,
+      ...(search ? [`--grep=${search}`] : []),
+      ...revisions,
+      ...paths,
+    ]),
+  );
+  return {
+    commits: commits.slice(0, limit),
+    hasMore: limit < LOG_MAX_COUNT && commits.length > limit,
+  };
+}
+
 export async function history(
   repo: string,
   params: Record<string, unknown> = {},
 ): Promise<Commit[]> {
-  const headExists = await hasHead(repo);
-  if (!headExists) {
-    if (params.ref === "HEAD") return [];
-    const refs = await git(repo, [
-      "for-each-ref",
-      "--count=1",
-      "--format=%(refname)",
-    ]);
-    if (!refs.trim()) return [];
+  return (await historyPage(repo, params)).commits;
+}
+
+export async function logPeople(repo: string): Promise<LogPerson[]> {
+  const revisions = await logRevisions(repo, []);
+  if (!revisions.length) return [];
+  const raw = await git(repo, ["log", "--format=%an%x00%ae", ...revisions]);
+  const people = new Map<string, LogPerson>();
+  for (const row of raw.split(/\r?\n/).filter(Boolean)) {
+    const [name, email] = row.split("\0");
+    if (name !== undefined && email !== undefined)
+      people.set(`${name}\0${email}`, { name, email });
   }
-  const args = [
-    "log",
-    "--topo-order",
-    `--format=${logFormat}`,
-    `--max-count=${Math.min(Math.max(Number(params.limit) || 300, 1), 3000)}`,
-  ];
-  if (params.search && /^[a-f0-9]{4,64}$/i.test(String(params.search))) {
-    try {
-      const hash = await resolveCommit(repo, String(params.search));
-      return parseLog(
-        await git(repo, ["show", "-s", `--format=${logFormat}`, hash]),
-      );
-    } catch {
-      /* A hexadecimal subject may not be an object name. */
-    }
-  }
-  if (params.ref) {
-    try {
-      args.push(await resolveCommit(repo, String(params.ref)));
-    } catch (error) {
-      if (/^refs\/(heads|remotes|tags)\//.test(String(params.ref))) return [];
-      throw error;
-    }
-  } else args.push("--all", ...(headExists ? ["HEAD"] : []));
-  if (params.search)
-    args.push(
-      "--regexp-ignore-case",
-      "--fixed-strings",
-      `--grep=${String(params.search)}`,
-    );
-  if (params.author) args.push(`--author=${String(params.author)}`);
-  if (params.since) args.push(`--since=${String(params.since)}`);
-  if (params.file) args.push("--", relativeFile(repo, String(params.file)));
-  return parseLog(await git(repo, args));
+  return [...people.values()].sort(
+    (a, b) => a.name.localeCompare(b.name) || a.email.localeCompare(b.email),
+  );
+}
+
+export async function logResolve(
+  repo: string,
+  params: Record<string, unknown>,
+): Promise<Commit> {
+  const hash = await resolveCommit(repo, logText(params, "ref", 500));
+  const commit = parseLog(
+    await git(repo, ["show", "-s", `--format=${logFormat}`, hash]),
+  )[0];
+  if (!commit) throw new Error("无法读取目标提交");
+  return commit;
+}
+
+export async function logLocate(
+  repo: string,
+  params: Record<string, unknown>,
+): Promise<LogLocation> {
+  const hash = await resolveCommit(repo, logText(params, "ref", 500));
+  const revisions = await logRevisions(repo, []);
+  if (!revisions.length) return { hash, limit: LOG_PAGE_SIZE, anchor: true };
+  const hashes = (
+    await git(repo, [
+      "log",
+      "--date-order",
+      `--max-count=${LOG_MAX_COUNT}`,
+      "--format=%H",
+      ...revisions,
+    ])
+  )
+    .trim()
+    .split(/\r?\n/);
+  const index = hashes.indexOf(hash);
+  return index < 0
+    ? { hash, limit: LOG_PAGE_SIZE, anchor: true }
+    : {
+        hash,
+        limit: Math.min(
+          LOG_MAX_COUNT,
+          Math.ceil((index + 1) / LOG_PAGE_SIZE) * LOG_PAGE_SIZE,
+        ),
+        anchor: false,
+      };
 }
 export async function snapshot(
   repo: string,
   params: Record<string, unknown> = {},
 ): Promise<RepoSnapshot> {
+  const headExists = await hasHead(repo);
   const [
     status,
     branch,
@@ -341,7 +595,7 @@ export async function snapshot(
     tagRows,
     remoteRows,
     stashRows,
-    commits,
+    page,
     name,
     email,
     version,
@@ -365,12 +619,14 @@ export async function snapshot(
     ]),
     git(repo, ["remote"]),
     git(repo, ["stash", "list", "--format=%gd%x00%gs%x00%aI"]),
-    history(repo, params),
+    historyPage(repo, params),
     config(repo, "user.name"),
     config(repo, "user.email"),
     git(repo, ["--version"]),
     git(repo, ["rev-parse", "--absolute-git-dir"]),
-    git(repo, ["show", "-s", `--format=${logFormat}`, "HEAD"]).catch(() => ""),
+    headExists
+      ? git(repo, ["show", "-s", `--format=${logFormat}`, "HEAD"])
+      : Promise.resolve(""),
   ]);
   const branches: Branch[] = refRows
     .trim()
@@ -392,14 +648,15 @@ export async function snapshot(
   const current = branches.find((b) => b.current);
   let ahead = 0,
     behind = 0;
-  if (current?.upstream) {
+  // A pruned upstream has no commit to compare; keep its [gone] tracking state.
+  if (current?.upstream && !current.track.includes("[gone]")) {
     const counts = (
       await git(repo, [
         "rev-list",
         "--left-right",
         "--count",
         "HEAD...@{upstream}",
-      ]).catch(() => "0\t0")
+      ])
     )
       .trim()
       .split(/\s+/);
@@ -451,9 +708,9 @@ export async function snapshot(
         const [ref, message, date] = row.split("\0");
         return { ref, message, date };
       }),
-    commits,
+    commits: page.commits,
     head: parseLog(headLog)[0] || null,
-    hasMore: commits.length >= (Number(params.limit) || 300),
+    hasMore: page.hasMore,
     operation,
     identity: { name, email },
     gitVersion: version.trim(),
@@ -855,6 +1112,16 @@ export async function mutate(
       ? params.paths.map((p) => relativeFile(repo, String(p)))
       : [];
     switch (action) {
+      case "log.index":
+        await git(repo, [
+          "-c",
+          "core.commitGraph=true",
+          "commit-graph",
+          "write",
+          "--reachable",
+          "--changed-paths",
+        ]);
+        return "Git 提交图与路径索引已更新";
       case "stage": {
         const filtered = await prepareCommitIndex(repo, paths);
         return filtered
