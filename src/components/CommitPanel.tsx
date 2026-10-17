@@ -10,7 +10,6 @@ import {
   ChevronsUpDown,
   Crosshair,
   Eye,
-  Minus,
   MoreVertical,
   RefreshCw,
   RotateCcw,
@@ -39,7 +38,6 @@ export function CommitPanel({
   confirm,
   settings,
   stash,
-  onHide,
   activePath,
 }: {
   snapshot: RepoSnapshot | null;
@@ -57,7 +55,6 @@ export function CommitPanel({
   ) => void;
   settings: () => void;
   stash: () => void;
-  onHide: () => void;
   activePath?: string;
 }) {
   const [workingOpen, setWorkingOpen] = useState(true),
@@ -199,9 +196,6 @@ export function CommitPanel({
             </button>
           </Popover>
         </div>
-        <IconButton title="隐藏提交栏" onClick={onHide}>
-          <Minus size={15} />
-        </IconButton>
       </PanelHeader>
       <div className="panel-toolbar commit-toolbar">
         <IconButton title="刷新更改" disabled={busy || !s} onClick={refresh}>

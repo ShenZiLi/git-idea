@@ -475,14 +475,6 @@ hr {
   color: var(--text);
   box-shadow: inset 2px 0 var(--blue);
 }
-.right-rail {
-  width: 35px;
-  border-left: 1px solid var(--border);
-  border-right: 0;
-}
-.right-rail .icon-button {
-  width: 28px;
-}
 .rail-spacer {
   flex: 1;
 }
@@ -505,12 +497,6 @@ hr {
 }
 .hide-project .upper-grid {
   grid-template-columns: minmax(0, 1fr) 4px var(--right-width);
-}
-.hide-commit .upper-grid {
-  grid-template-columns: var(--left-width) 4px minmax(0, 1fr);
-}
-.hide-commit.hide-project .upper-grid {
-  grid-template-columns: minmax(0, 1fr);
 }
 .panel {
   min-height: 0;
@@ -2564,10 +2550,6 @@ hr {
   .upper-grid > .project-panel + .resize-x {
     display: none;
   }
-  .hide-commit .upper-grid,
-  .hide-commit.hide-project .upper-grid {
-    grid-template-columns: 1fr;
-  }
   .bottom-grid {
     grid-template-columns: minmax(0, 1fr) 4px 260px;
   }
@@ -2593,9 +2575,6 @@ hr {
   }
   .project-selector strong {
     max-width: 110px;
-  }
-  .right-rail {
-    display: none;
   }
   .tool-rail {
     width: 34px;

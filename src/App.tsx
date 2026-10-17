@@ -97,7 +97,6 @@ export default function App() {
     [logs, setLogs] = useState<CommandLog[]>([]),
     [bottomTab, setBottomTab] = useState("log");
   const [projectVisible, setProjectVisible] = useState(true),
-    [commitVisible, setCommitVisible] = useState(true),
     [logVisible, setLogVisible] = useState(true);
   const [form, setForm] = useState<FormSpec | null>(null),
     [confirmation, setConfirmation] = useState<ConfirmSpec | null>(null),
@@ -661,7 +660,6 @@ export default function App() {
         if (!busyRef.current) void refresh();
       } else if (e.key.toLowerCase() === "k") {
         e.preventDefault();
-        setCommitVisible(true);
         setTimeout(
           () =>
             document
@@ -1005,7 +1003,7 @@ export default function App() {
           </IconButton>
         </nav>
         <main
-          className={`workbench ${!projectVisible ? "hide-project" : ""} ${!commitVisible ? "hide-commit" : ""}`}
+          className={`workbench ${!projectVisible ? "hide-project" : ""}`}
           ref={workbench}
           style={{
             gridTemplateRows: logVisible
@@ -1051,23 +1049,18 @@ export default function App() {
               onDirty={setEditorDirty}
               flushRef={editorFlush}
             />
-            {commitVisible && (
-              <div
-                className="resize-x"
-                role="separator"
-                aria-label="调整提交面板宽度"
-                onPointerDown={(e) => resize("right", e)}
-              />
-            )}
-            {commitVisible && (
-              <CommitPanel
-                snapshot={snapshot}
-                {...{ busy, mutate, openDiff, confirm, settings, stash }}
-                activePath={tab?.path}
-                onHide={() => setCommitVisible(false)}
-                refresh={() => void refresh()}
-              />
-            )}
+            <div
+              className="resize-x"
+              role="separator"
+              aria-label="调整提交面板宽度"
+              onPointerDown={(e) => resize("right", e)}
+            />
+            <CommitPanel
+              snapshot={snapshot}
+              {...{ busy, mutate, openDiff, confirm, settings, stash }}
+              activePath={tab?.path}
+              refresh={() => void refresh()}
+            />
           </div>
           {logVisible && (
             <>
@@ -1185,31 +1178,6 @@ export default function App() {
             </>
           )}
         </main>
-        <nav className="tool-rail right-rail" aria-label="辅助工具">
-          <IconButton
-            title="提交工具窗口"
-            active={commitVisible}
-            onClick={() => setCommitVisible(!commitVisible)}
-          >
-            <SidebarIcon name="changes" />
-          </IconButton>
-          <span className="rail-spacer" />
-          <IconButton
-            title="切换深浅主题"
-            static
-            onClick={() => {
-              const next = theme === "dark" ? "light" : "dark";
-              setTheme(next);
-              void request("preferences", undefined, { theme: next });
-            }}
-          >
-            <IconSwap
-              active={theme === "dark"}
-              on={<SidebarIcon name="sun" />}
-              off={<SidebarIcon name="moon" />}
-            />
-          </IconButton>
-        </nav>
       </div>
       <Presence>
         {toast && (
