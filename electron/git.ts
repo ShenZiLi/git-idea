@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
+import { lineChanges } from "../shared/line-changes.ts";
 import type {
   Branch,
   Change,
@@ -29,6 +31,7 @@ export async function git(
   args: string[],
   input?: string,
   acceptedExitCodes: readonly number[] = [0],
+  extraEnv: Record<string, string> = {},
 ): Promise<string> {
   const start = Date.now();
   return new Promise((resolve, reject) => {
@@ -41,6 +44,8 @@ export async function git(
       "clean",
       "diff",
       "log",
+      "ls-files",
+      "ls-tree",
     ].includes(args[0]);
     const child = spawn(
       "git",
@@ -55,7 +60,12 @@ export async function git(
         cwd,
         windowsHide: true,
         shell: false,
-        env: { ...process.env, GIT_TERMINAL_PROMPT: "0", LC_ALL: "C.UTF-8" },
+        env: {
+          ...process.env,
+          GIT_TERMINAL_PROMPT: "0",
+          LC_ALL: "C.UTF-8",
+          ...extraEnv,
+        },
         stdio: ["pipe", "pipe", "pipe"],
       },
     );
@@ -119,6 +129,8 @@ export async function git(
           "check-ref-format",
           "check-ignore",
           "show-ref",
+          "ls-files",
+          "ls-tree",
           "--version",
         ].includes(args[0]) ||
         (args[0] === "config" && args.includes("--get")) ||
@@ -487,7 +499,13 @@ export async function tree(repo: string, directory = ""): Promise<TreeEntry[]> {
 export async function readFile(
   repo: string,
   file: string,
-): Promise<{ text: string; binary: boolean; truncated: boolean }> {
+  withBaseline = false,
+): Promise<{
+  text: string;
+  binary: boolean;
+  truncated: boolean;
+  baseline?: string;
+}> {
   const diskPath = await safeDiskPath(repo, file);
   const handle = await fs.open(diskPath, "r");
   try {
@@ -496,10 +514,16 @@ export async function readFile(
     const data = Buffer.alloc(Math.min(stat.size, MAX_TEXT));
     await handle.read(data, 0, data.length, 0);
     const binary = data.subarray(0, 8192).includes(0);
+    let baseline: string | undefined;
+    if (withBaseline && !binary && stat.size <= MAX_TEXT) {
+      const original = await blob(repo, "HEAD", relativeFile(repo, file));
+      if (!original.binary && !original.truncated) baseline = original.text;
+    }
     return {
       text: binary ? "" : data.toString("utf8"),
       binary,
       truncated: stat.size > MAX_TEXT,
+      ...(baseline !== undefined ? { baseline } : {}),
     };
   } finally {
     await handle.close();
@@ -684,6 +708,123 @@ async function branchName(repo: string, value: string) {
   await git(repo, ["check-ref-format", "--branch", value]);
   return value;
 }
+
+// Build a private index first; publish it only if the real index is unchanged.
+// The worktree is never rewritten when excluding formatting-only changes.
+async function prepareCommitIndex(repo: string, stagePaths?: string[]) {
+  const indexPath = path.resolve(
+    repo,
+    (await git(repo, ["rev-parse", "--git-path", "index"])).trim(),
+  );
+  const readIndex = () =>
+    fs.readFile(indexPath).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    });
+  const original = await readIndex();
+  if (!original && stagePaths === undefined) return 0;
+  const temporary = path.join(
+    path.dirname(indexPath),
+    `git-idea-${randomUUID()}.index`,
+  );
+  const env = { GIT_INDEX_FILE: temporary };
+  const lockPath = `${indexPath}.lock`;
+  let lock: Awaited<ReturnType<typeof fs.open>> | undefined;
+  let ownsLock = false;
+  try {
+    if (original) await fs.writeFile(temporary, original, { flag: "wx" });
+    if (stagePaths !== undefined)
+      await git(
+        repo,
+        ["add", "--", ...(stagePaths.length ? stagePaths : ["."])],
+        undefined,
+        [0],
+        env,
+      );
+    const selected = stagePaths?.length ? stagePaths : [];
+    const head = await hasHead(repo);
+    const [entries, tree] = await Promise.all([
+      git(
+        repo,
+        ["ls-files", "--stage", "-z", "--", ...selected],
+        undefined,
+        [0],
+        env,
+      ),
+      head
+        ? git(repo, ["ls-tree", "-r", "-z", "HEAD", "--", ...selected])
+        : Promise.resolve(""),
+    ]);
+    const originals = new Map<string, string>();
+    for (const entry of tree.split("\0")) {
+      const match = /^(100644|100755) blob ([a-f0-9]+)\t([\s\S]+)$/.exec(entry);
+      if (match) originals.set(match[3], match[2]);
+    }
+    const replacements: string[] = [];
+    for (const entry of entries.split("\0")) {
+      const match = /^(100644|100755) ([a-f0-9]+) 0\t([\s\S]+)$/.exec(entry);
+      if (!match) continue;
+      const [, mode, hash, file] = match;
+      const base = originals.get(file);
+      if (!base || base === hash) continue;
+      const sizes = await Promise.all(
+        [base, hash].map((id) => git(repo, ["cat-file", "-s", id])),
+      );
+      if (sizes.some((size) => Number(size.trim()) > MAX_TEXT)) continue;
+      const [before, after] = await Promise.all(
+        [base, hash].map((id) => git(repo, ["cat-file", "blob", id])),
+      );
+      if (
+        [before, after].some(
+          (text) => text.includes("\0") || text.includes("\ufffd"),
+        )
+      )
+        continue;
+      const filtered = lineChanges(before, after).commitText;
+      if (filtered === after) continue;
+      const content = (
+        await git(
+          repo,
+          ["hash-object", "-w", "--no-filters", "--stdin"],
+          filtered,
+        )
+      ).trim();
+      replacements.push(`${mode} ${content}\t${file}\0`);
+    }
+    if (replacements.length)
+      await git(
+        repo,
+        ["update-index", "-z", "--index-info"],
+        replacements.join(""),
+        [0],
+        env,
+      );
+    if (stagePaths === undefined && !replacements.length) return 0;
+    try {
+      lock = await fs.open(lockPath, "wx");
+      ownsLock = true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST")
+        throw new Error("Git 暂存区正被其他操作使用，请稍后重试。");
+      throw error;
+    }
+    const current = await readIndex();
+    if (original ? !current?.equals(original) : current !== null)
+      throw new Error("暂存区已被其他程序修改，请刷新后重试。");
+    await lock.writeFile(await fs.readFile(temporary));
+    await lock.sync();
+    await lock.close();
+    lock = undefined;
+    await fs.rename(lockPath, indexPath);
+    ownsLock = false;
+    return replacements.length;
+  } finally {
+    await lock?.close().catch(() => {});
+    if (ownsLock) await fs.rm(lockPath, { force: true });
+    await fs.rm(temporary, { force: true });
+    await fs.rm(`${temporary}.lock`, { force: true });
+  }
+}
 export async function mutate(
   repo: string,
   action: string,
@@ -694,8 +835,12 @@ export async function mutate(
       ? params.paths.map((p) => relativeFile(repo, String(p)))
       : [];
     switch (action) {
-      case "stage":
-        return git(repo, ["add", "--", ...(paths.length ? paths : ["."])]);
+      case "stage": {
+        const filtered = await prepareCommitIndex(repo, paths);
+        return filtered
+          ? `暂存区已更新，${filtered} 个文件的纯格式差异保留在工作区。`
+          : "文件已暂存。";
+      }
       case "unstage":
         return (await hasHead(repo))
           ? git(repo, ["reset", "--", ...(paths.length ? paths : ["."])])
@@ -720,13 +865,29 @@ export async function mutate(
         }
         return "工作区改动已丢弃";
       }
-      case "commit":
+      case "commit": {
+        const filtered = await prepareCommitIndex(repo);
+        if (
+          filtered &&
+          !params.amend &&
+          !(await git(repo, ["diff", "--cached", "--name-only", "-z"])).length
+        ) {
+          const mergeHead = path.resolve(
+            repo,
+            (await git(repo, ["rev-parse", "--git-path", "MERGE_HEAD"])).trim(),
+          );
+          if (!(await exists(mergeHead)))
+            throw new Error(
+              "只有纯格式变化，没有需要提交的内容改动。格式仍保留在工作区。",
+            );
+        }
         return git(repo, [
           "commit",
           ...(params.amend ? ["--amend"] : []),
           "-m",
           string(params, "message"),
         ]);
+      }
       case "branch.create":
         return git(repo, [
           "switch",

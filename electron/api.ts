@@ -115,7 +115,7 @@ export function createApi(
       case "tree":
         return tree(repo, String(p.path || ""));
       case "file":
-        return readFile(repo, String(p.path || ""));
+        return readFile(repo, String(p.path || ""), p.baseline === true);
       case "saveFile":
         return saveFile(repo, String(p.path || ""), String(p.text ?? ""));
       case "diff":

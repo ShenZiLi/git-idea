@@ -72,6 +72,7 @@ export interface DiffData {
   beforeLabel: string;
   afterLabel: string;
   truncated?: boolean;
+  baselineAvailable?: boolean;
 }
 export interface ChangedFile {
   path: string;

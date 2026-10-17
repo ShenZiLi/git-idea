@@ -17,6 +17,7 @@ import {
 import type { DiffData } from "../../shared/types";
 import { request } from "../api";
 import { diffRows } from "../diff";
+import { lineChanges, type LineChange } from "../../shared/line-changes";
 import { Empty, FileIcon, IconButton, Spinner } from "./ui";
 
 export interface EditorTab {
@@ -55,6 +56,58 @@ function Highlight({ text }: { text: string }) {
         </span>
       ))}
     </>
+  );
+}
+function LineMarker({ change }: { change?: LineChange }) {
+  if (
+    !change ||
+    (!change.kind && !change.deletedBefore && !change.deletedAfter)
+  )
+    return null;
+  const label = [
+    change.kind === "add"
+      ? "新增"
+      : change.kind === "change"
+        ? "修改"
+        : change.kind === "format"
+          ? "仅格式变化，不提交 Git"
+          : "",
+    change.deletedBefore ? `此处之前删除 ${change.deletedBefore} 行` : "",
+    change.deletedAfter ? `此处之后删除 ${change.deletedAfter} 行` : "",
+  ]
+    .filter(Boolean)
+    .join("；");
+  return (
+    <span
+      className={`line-change-mark ${change.kind || ""}`}
+      title={label}
+      role="img"
+      aria-label={label}
+      data-deleted-before={change.deletedBefore || undefined}
+      data-deleted-after={change.deletedAfter || undefined}
+    />
+  );
+}
+function ChangeLegend() {
+  return (
+    <span className="line-change-legend" aria-label="行改动标记图例">
+      <span>
+        <i className="add" />
+        新增
+      </span>
+      <span>
+        <i className="change" />
+        修改
+      </span>
+      <span>
+        <i className="delete" />
+        删除
+      </span>
+      <span title="暂存和提交时自动排除，文件保留原格式">
+        <i className="format" />
+        格式 · 不提交
+      </span>
+    </span>
   );
 }
 export function Editor({
@@ -112,7 +165,9 @@ export function Editor({
     contextRef = useRef(""),
     focusPending = useRef(false),
     textarea = useRef<HTMLTextAreaElement>(null),
-    gutter = useRef<HTMLPreElement>(null);
+    gutter = useRef<HTMLDivElement>(null),
+    mirror = useRef<HTMLDivElement>(null);
+  const [lineHeights, setLineHeights] = useState<number[]>([]);
   contextRef.current = `${repo}:${tab?.id || ""}`;
   dirtyRef.current = dirty;
   useLayoutEffect(() => {
@@ -148,7 +203,7 @@ export function Editor({
       setData(null);
       setEdit(false);
       setShowAll(false);
-      focusPending.current = tab.kind === "file";
+      focusPending.current = false;
     }
     setError("");
     const query =
@@ -159,17 +214,19 @@ export function Editor({
             commit: tab.commit,
             oldPath: tab.oldPath,
           })
-        : request<{ text: string; binary: boolean; truncated: boolean }>(
-            "file",
-            repo,
-            { path: tab.path },
-          ).then((file) => ({
+        : request<{
+            text: string;
+            binary: boolean;
+            truncated: boolean;
+            baseline?: string;
+          }>("file", repo, { path: tab.path, baseline: true }).then((file) => ({
             path: tab.path,
-            before: "",
+            before: file.baseline ?? "",
             after: file.text,
             raw: "",
             binary: file.binary,
             truncated: file.truncated,
+            baselineAvailable: file.baseline !== undefined,
             beforeLabel: "",
             afterLabel: "工作区",
           }));
@@ -185,7 +242,7 @@ export function Editor({
           setDraft(normalizeLines(v.after));
           if (v.binary || v.truncated || tab.commit || tab.staged)
             setEdit(false);
-          else if (changingTab) setEdit(tab.kind === "file");
+          else if (changingTab) setEdit(false);
         }
       })
       .catch(
@@ -207,6 +264,40 @@ export function Editor({
         : [],
     [data, tab?.kind, ignoreWhitespace],
   );
+  const draftLines = useMemo(() => draft.split("\n"), [draft]);
+  const changes = useMemo(
+    () =>
+      data &&
+      data.baselineAvailable !== false &&
+      !data.binary &&
+      !data.truncated
+        ? lineChanges(data.before, edit ? draft : data.after).markers
+        : [],
+    [data, edit, draft],
+  );
+  useLayoutEffect(() => {
+    if (!edit || !wrap || !textarea.current || !mirror.current) return;
+    const input = textarea.current,
+      measure = mirror.current;
+    const update = () => {
+      measure.style.width = `${input.clientWidth}px`;
+      const heights = Array.from(
+        measure.children,
+        (line) => line.getBoundingClientRect().height,
+      );
+      setLineHeights((current) =>
+        current.length === heights.length &&
+        current.every((height, i) => height === heights[i])
+          ? current
+          : heights,
+      );
+    };
+    const observer = new ResizeObserver(update);
+    observer.observe(input);
+    Array.from(measure.children).forEach((line) => observer.observe(line));
+    update();
+    return () => observer.disconnect();
+  }, [draftLines, edit, wrap, loading]);
   const fileLines = data?.after.replaceAll("\r\n", "\n").split("\n") || [];
   const matches = useMemo(
     () =>
@@ -432,17 +523,32 @@ export function Editor({
                 </button>
               </div>
               <div className={`edit-body ${wrap ? "wrap-code" : ""}`}>
-                {!wrap && (
-                  <pre
-                    ref={gutter}
-                    className="edit-line-numbers"
+                <div
+                  ref={gutter}
+                  className="edit-line-numbers"
+                  aria-label="行号与改动标记"
+                >
+                  {draftLines.map((_, i) => (
+                    <div
+                      key={i}
+                      className="edit-line-number"
+                      style={{ height: wrap ? lineHeights[i] || 22 : 22 }}
+                    >
+                      {i + 1}
+                      <LineMarker change={changes[i]} />
+                    </div>
+                  ))}
+                </div>
+                {wrap && (
+                  <div
+                    ref={mirror}
+                    className="edit-line-mirror"
                     aria-hidden="true"
                   >
-                    {Array.from(
-                      { length: draft.split("\n").length },
-                      (_, i) => i + 1,
-                    ).join("\n")}
-                  </pre>
+                    {draftLines.map((line, i) => (
+                      <div key={i}>{line || "\u200b"}</div>
+                    ))}
+                  </div>
                 )}
                 <textarea
                   ref={textarea}
@@ -467,6 +573,7 @@ export function Editor({
               </div>
               <div className="editor-footer">
                 <span>{dirty ? "有未保存的修改" : "所有修改已保存"}</span>
+                <ChangeLegend />
                 <span className="spacer" />
                 <span>{draft.split("\n").length} 行</span>
                 <span>UTF-8</span>
@@ -501,7 +608,10 @@ export function Editor({
                       .slice(0, showAll ? undefined : 3000)
                       .map((line, i) => (
                         <div key={i} className={`code-line${codeMatch(line)}`}>
-                          <span className="line-number">{i + 1}</span>
+                          <span className="line-number">
+                            {i + 1}
+                            <LineMarker change={changes[i]} />
+                          </span>
                           <code>
                             <Highlight text={line} />
                           </code>
@@ -605,6 +715,7 @@ export function Editor({
                     <span className="muted">{matches.length} 处改动</span>
                   </>
                 )}
+                {tab.kind === "file" && <ChangeLegend />}
                 <span className="spacer" />
                 <span>UTF-8</span>
                 <span>{data?.after.includes("\r\n") ? "CRLF" : "LF"}</span>

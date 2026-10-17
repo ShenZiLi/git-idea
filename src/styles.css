@@ -65,6 +65,10 @@
   --syntax-number: #83d7de;
   --syntax-comment: #a7a7a7;
   --file-alt: #c6b1f0;
+  --line-added: #79cf91;
+  --line-deleted: #f06c6c;
+  --line-modified: #e7a15e;
+  --line-format: #969696;
 }
 :root[data-theme="light"] {
   color-scheme: light;
@@ -116,6 +120,10 @@
   --syntax-number: #006d7b;
   --syntax-comment: #53667e;
   --file-alt: #7953ab;
+  --line-added: #2b7d46;
+  --line-deleted: #c43f45;
+  --line-modified: #b76816;
+  --line-format: #747474;
 }
 * {
   box-sizing: border-box;
@@ -912,6 +920,7 @@ hr {
   min-height: 22px;
 }
 .line-number {
+  position: relative;
   width: 45px;
   flex-shrink: 0;
   padding: 0 12px 0 6px;
@@ -1058,6 +1067,7 @@ hr {
   font-size: 9px;
 }
 .edit-body {
+  position: relative;
   display: flex;
   flex: 1;
   min-height: 0;
@@ -1065,8 +1075,9 @@ hr {
 }
 .edit-line-numbers {
   margin: 0;
-  padding: 8px 10px 8px 6px;
-  min-width: 45px;
+  padding: 8px 0;
+  width: max-content;
+  min-width: 56px;
   overflow: hidden;
   text-align: right;
   flex-shrink: 0;
@@ -1076,6 +1087,91 @@ hr {
   color: var(--faint);
   border-right: 1px solid var(--subtle-border);
   user-select: none;
+}
+.edit-line-number {
+  position: relative;
+  padding: 0 14px 0 6px;
+  min-height: 22px;
+}
+.line-change-mark {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  right: 3px;
+  width: 3px;
+  border-radius: 1px;
+}
+.line-change-mark.add,
+.line-change-legend .add {
+  background: var(--line-added);
+}
+.line-change-mark.change,
+.line-change-legend .change {
+  background: var(--line-modified);
+}
+.line-change-mark.format,
+.line-change-legend .format {
+  background: var(--line-format);
+}
+.line-change-legend .delete {
+  background: var(--line-deleted);
+}
+.line-change-mark[data-deleted-before]::before,
+.line-change-mark[data-deleted-after]::after {
+  content: "";
+  position: absolute;
+  left: -2px;
+  width: 7px;
+  height: 6px;
+  background: var(--line-deleted);
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+}
+.line-change-mark[data-deleted-before]::before {
+  top: -3px;
+}
+.line-change-mark[data-deleted-after]::after {
+  bottom: -3px;
+}
+.line-change-legend,
+.line-change-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.line-change-legend {
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.line-change-legend > span {
+  white-space: nowrap;
+}
+.line-change-legend i {
+  width: 3px;
+  height: 11px;
+  border-radius: 1px;
+}
+.editor-footer:has(.line-change-legend) {
+  height: auto;
+  min-height: 27px;
+  flex-wrap: wrap;
+  padding-block: 4px;
+}
+.edit-line-mirror {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 8px 12px;
+  font-family: var(--code-font);
+  font-size: var(--editor-font-size, 13px);
+  line-height: 22px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 2;
+  visibility: hidden;
+  pointer-events: none;
+}
+.edit-line-mirror > div {
+  min-height: 22px;
 }
 .edit-area textarea {
   flex: 1;
