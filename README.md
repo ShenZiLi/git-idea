@@ -68,6 +68,8 @@ npm run package:linux   # Linux AppImage，在 Linux 上构建
 
 产物位于 `release/`。项目提供 Windows、macOS、Linux 的 CI 构建与桌面验证流程。macOS 产物默认未签名；正式分发时需配置开发者签名。Windows 和 Linux 默认使用本机架构。Git 不随应用分发，需要在目标系统安装。
 
+本轮 Windows 交付：`release/Git-IDEA-0.1.0-x64-commit-workbench.exe`，包含提交工作台方案 A、IDEA 风格日志及分支菜单。检查范围和已知边界见 [实施交付记录](docs/superpowers/plans/2026-10-18-commit-workbench.md)。
+
 若 Electron 二进制下载受网络影响，可临时设置 `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/` 和 `ELECTRON_CUSTOM_DIR={{ version }}`，再执行 `node node_modules/electron/install.js`。安装过程会校验发行包摘要。
 
 ## 验证
