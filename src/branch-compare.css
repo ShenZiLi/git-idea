@@ -1,0 +1,297 @@
+.modal.wide:has(> .branch-compare) {
+  width: min(1420px, calc(100vw - 48px));
+  max-width: calc(100vw - 48px);
+  max-height: calc(100dvh - 48px);
+}
+.branch-compare {
+  display: flex;
+  flex-direction: column;
+  height: min(780px, calc(100dvh - 130px));
+  min-height: 240px;
+  overflow: hidden;
+}
+.compare-toolbar,
+.compare-direction,
+.compare-section-title,
+.compare-file-summary,
+.compare-diff-labels {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.compare-toolbar {
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--subtle-border);
+  background: color-mix(in srgb, var(--surface) 76%, transparent);
+}
+.compare-toolbar button {
+  flex-shrink: 0;
+}
+.compare-direction {
+  flex: 1;
+  min-width: 120px;
+}
+.compare-direction strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.compare-direction svg {
+  flex-shrink: 0;
+}
+.compare-caption {
+  padding: 8px 14px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.compare-layout {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(180px, 23%) minmax(210px, 25%) minmax(
+      280px,
+      1fr
+    );
+  min-height: 0;
+  overflow: auto;
+  border-top: 1px solid var(--subtle-border);
+}
+.compare-layout.worktree {
+  grid-template-columns: minmax(230px, 30%) minmax(280px, 1fr);
+}
+.compare-commits,
+.compare-files,
+.compare-diff {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.compare-commits,
+.compare-files {
+  border-right: 1px solid var(--subtle-border);
+}
+.compare-section-title {
+  min-height: 36px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--subtle-border);
+  font-size: 11px;
+}
+.compare-section-title strong {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.compare-commit-scroll,
+.compare-file-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.compare-commit,
+.compare-file,
+.compare-all {
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  text-align: left;
+  background: transparent;
+}
+.compare-commit {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--subtle-border);
+}
+.compare-commit strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 500;
+}
+.compare-commit > span,
+.compare-commit time {
+  color: var(--muted);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+.compare-all {
+  min-height: 35px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--subtle-border);
+}
+.branch-compare .selected {
+  background: color-mix(in srgb, var(--text) 12%, transparent);
+}
+.compare-load {
+  margin: 12px;
+  width: calc(100% - 24px);
+}
+.compare-search {
+  margin: 10px 10px 4px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
+  border: 1px solid var(--control-border);
+  border-radius: 7px;
+  background: var(--surface);
+}
+.compare-search:focus-within {
+  outline: 2px solid var(--muted);
+  outline-offset: 2px;
+}
+.compare-search input,
+.compare-search input:focus {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  outline: none;
+  box-shadow: none;
+  background: transparent;
+}
+.compare-search svg {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.compare-file-summary {
+  padding: 7px 12px;
+  font-size: 10px;
+}
+.compare-file-summary > :last-child {
+  margin-left: auto;
+}
+.compare-file {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 10px;
+  min-height: 36px;
+}
+.compare-file > svg {
+  flex-shrink: 0;
+}
+.compare-file-path {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+.compare-file-path small {
+  display: block;
+  color: var(--muted);
+  margin-top: 3px;
+  font-size: 9px;
+}
+.compare-file-stat {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  font-size: 9px;
+  max-width: 78px;
+}
+.compare-description {
+  max-height: 30%;
+  overflow: auto;
+  padding: 12px;
+  border-top: 1px solid var(--subtle-border);
+}
+.compare-description strong,
+.compare-description > span {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+.compare-description > span {
+  color: var(--muted);
+  margin-top: 7px;
+}
+.compare-description pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: inherit;
+  font-size: 11px;
+}
+.compare-status {
+  flex: 1;
+  min-height: 100px;
+  padding: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+}
+.compare-status[role="alert"] {
+  color: var(--red);
+}
+.compare-diff-labels {
+  padding: 8px 12px;
+  font-size: 10px;
+  border-bottom: 1px solid var(--subtle-border);
+  flex-wrap: wrap;
+}
+.compare-diff-labels > span {
+  overflow-wrap: anywhere;
+}
+.compare-diff-labels > :first-child {
+  color: var(--red);
+}
+.compare-diff-labels > :last-child {
+  color: var(--green);
+}
+.compare-code {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 0;
+  font-family: var(--code-font);
+  font-size: 11px;
+  line-height: 20px;
+  tab-size: 4;
+}
+.compare-code-line {
+  display: grid;
+  grid-template-columns: 42px 42px 20px minmax(max-content, 1fr);
+  width: max-content;
+  min-width: 100%;
+}
+.compare-code-line > span {
+  color: var(--muted);
+  text-align: right;
+  padding-right: 7px;
+  user-select: none;
+}
+.compare-code-line > code {
+  padding: 0 12px 0 3px;
+  white-space: pre;
+  font: inherit;
+}
+.compare-code-line.removed {
+  background: color-mix(in srgb, var(--red) 13%, transparent);
+}
+.compare-code-line.added {
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+}
+.compare-diff > .empty-state {
+  flex: 1;
+  padding: 24px;
+  text-align: center;
+}
+@media (max-width: 850px) {
+  .compare-layout {
+    grid-template-columns: 180px 210px minmax(280px, 1fr);
+  }
+  .compare-layout.worktree {
+    grid-template-columns: 220px minmax(280px, 1fr);
+  }
+}

@@ -22,15 +22,22 @@ export function BranchPanel({
   manage,
   createTag,
   deleteTag,
+  busy = false,
 }: {
   snapshot: RepoSnapshot | null;
   filter: string;
   onFilter: (ref: string) => void;
   checkout: (branch: Branch) => void;
   create: () => void;
-  manage: (branch: Branch) => void;
+  manage: (
+    branch: Branch,
+    anchor: HTMLElement,
+    point?: { x: number; y: number },
+    initialAction?: string,
+  ) => void;
   createTag: () => void;
   deleteTag: (name: string) => void;
+  busy?: boolean;
 }) {
   const [search, setSearch] = useState(""),
     [local, setLocal] = useState(true),
@@ -44,9 +51,35 @@ export function BranchPanel({
       key={branch.ref}
     >
       <button
+        aria-haspopup="menu"
         title={`${branch.name}${branch.upstream ? ` → ${branch.upstream}` : ""}\n单击筛选日志，双击检出`}
         onClick={() => onFilter(branch.ref === filter ? "" : branch.ref)}
         onDoubleClick={() => checkout(branch)}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          event.currentTarget.focus();
+          manage(branch, event.currentTarget, {
+            x: event.clientX,
+            y: event.clientY,
+          });
+        }}
+        onKeyDown={(event) => {
+          if (
+            event.key === "ContextMenu" ||
+            (event.key === "F10" && event.shiftKey)
+          ) {
+            event.preventDefault();
+            manage(branch, event.currentTarget);
+          } else if (!busy && (event.key === "F2" || event.key === "Delete")) {
+            event.preventDefault();
+            manage(
+              branch,
+              event.currentTarget,
+              undefined,
+              event.key === "F2" ? "rename" : "delete",
+            );
+          }
+        }}
       >
         {branch.current ? (
           <GitBranch size={14} className="gold" />
@@ -72,7 +105,8 @@ export function BranchPanel({
       </button>
       <IconButton
         title={`分支操作 ${branch.name}`}
-        onClick={() => manage(branch)}
+        aria-haspopup="menu"
+        onClick={(event) => manage(branch, event.currentTarget)}
       >
         <MoreHorizontal size={13} />
       </IconButton>

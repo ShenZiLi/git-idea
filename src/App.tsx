@@ -46,6 +46,10 @@ import { SidebarIcon } from "./components/SidebarIcon";
 import { CommitPanel } from "./components/CommitPanel";
 import { Editor, type EditorTab } from "./components/Editor";
 import { BranchPanel } from "./components/BranchPanel";
+import { BranchMenu, type BranchMenuTarget } from "./components/BranchMenu";
+import { BranchCompare } from "./components/BranchCompare";
+import type { BranchInfo } from "../shared/branches";
+import { performBranchAction } from "./branch-actions";
 import {
   CommitDetails,
   ConsolePanel,
@@ -103,10 +107,16 @@ export default function App() {
   const [form, setForm] = useState<FormSpec | null>(null),
     [confirmation, setConfirmation] = useState<ConfirmSpec | null>(null),
     [switcher, setSwitcher] = useState(false),
-    [branchManage, setBranchManage] = useState<Branch | null>(null),
+    [branchManage, setBranchManage] = useState<BranchMenuTarget | null>(null),
     [repoMenu, setRepoMenu] = useState(false),
     [mainMenu, setMainMenu] = useState(false),
     [help, setHelp] = useState(false);
+  const [comparison, setComparison] = useState<{
+    repo: string;
+    branch: Branch;
+    mode: "branches" | "worktree";
+  } | null>(null);
+  const branchLookup = useRef(0);
   const [remoteDialog, setRemoteDialog] = useState(false),
     [editorDirty, setEditorDirty] = useState(false);
   const [toast, setToast] = useState<NotificationMessage | null>(null),
@@ -186,6 +196,9 @@ export default function App() {
       if (revision !== navigationRevision.current) return false;
       repoRef.current = root;
       setRepo(root);
+      setBranchManage(null);
+      setComparison(null);
+      branchLookup.current++;
       setTabs([]);
       setActiveTab("");
       setSelectedCommit("");
@@ -291,15 +304,20 @@ export default function App() {
               ? `refs/tags/${params.name}`
               : `refs/heads/${params.name}`;
           if (
-            ["branch.delete", "tag.delete", "branch.rename"].includes(action) &&
-            current.ref === targetRef
+            [
+              "branch.delete",
+              "tag.delete",
+              "branch.rename",
+              "branch.deleteRef",
+              "branch.renameRef",
+            ].includes(action) &&
+            current.ref === (params.ref || targetRef)
           ) {
             next = {
               ...current,
-              ref:
-                action === "branch.rename"
-                  ? `refs/heads/${params.newName}`
-                  : "",
+              ref: ["branch.rename", "branch.renameRef"].includes(action)
+                ? `refs/heads/${params.newName}`
+                : "",
             };
             setFilters(next);
           }
@@ -411,12 +429,77 @@ export default function App() {
       onSubmit: (values) => mutate("branch.create", values),
     });
   }
-  function checkout(branch: Branch) {
-    if (branch.current) return;
-    void mutate("branch.checkout", {
-      name: branch.name,
-      remote: branch.remote,
+  function showBranchMenu(
+    branch: Branch,
+    anchor: HTMLElement,
+    point?: { x: number; y: number },
+    initialAction?: string,
+  ) {
+    branchLookup.current++;
+    setBranchManage({
+      repo: repoRef.current,
+      branch,
+      anchor,
+      point,
+      initialAction,
     });
+  }
+  function branchAction(
+    name: string,
+    info: BranchInfo,
+    extra: Record<string, unknown> = {},
+  ) {
+    if (!["compare", "worktreeDiff"].includes(name) && busyRef.current) {
+      notify("其他 Git 操作正在执行，请稍后再试。", true);
+      return;
+    }
+    const targetRepo = repoRef.current;
+    performBranchAction(name, info, extra, {
+      repo: targetRepo,
+      getRepo: () => repoRef.current,
+      snapshot,
+      mutate,
+      confirm,
+      form: setForm,
+      openRepository,
+      notify,
+      compare: async (mode) => {
+        const id = ++branchLookup.current;
+        if (
+          mode === "worktree" &&
+          editorFlush.current &&
+          !(await editorFlush.current())
+        )
+          return;
+        if (id !== branchLookup.current || targetRepo !== repoRef.current)
+          return;
+        const branch: Branch = {
+          ref: info.ref,
+          name: info.name,
+          hash: info.hash,
+          remote: info.remote,
+          current: info.ref === info.currentRef,
+          upstream: info.upstream,
+          track: "",
+        };
+        setComparison({ repo: targetRepo, branch, mode });
+      },
+    });
+  }
+  async function checkout(branch: Branch) {
+    if (branch.current || busyRef.current) return;
+    const target = repoRef.current,
+      id = ++branchLookup.current;
+    try {
+      const info = await request<BranchInfo>("branchInfo", target, {
+        ref: branch.ref,
+      });
+      if (target === repoRef.current && id === branchLookup.current)
+        branchAction("checkout", info);
+    } catch (cause) {
+      if (target === repoRef.current && id === branchLookup.current)
+        notify((cause as Error).message, true);
+    }
   }
   function createTag(hash = "HEAD") {
     setForm({
@@ -1138,7 +1221,8 @@ export default function App() {
                     }
                     {...{ checkout }}
                     create={() => createBranch()}
-                    manage={setBranchManage}
+                    manage={showBranchMenu}
+                    busy={busy}
                     createTag={() => createTag()}
                     deleteTag={(name) =>
                       confirm("删除标签", `删除本地标签 ${name}？`, () =>
@@ -1242,6 +1326,7 @@ export default function App() {
           <BranchSwitcher
             snapshot={snapshot}
             {...{ checkout }}
+            manage={showBranchMenu}
             create={() => createBranch()}
             onClose={() => setSwitcher(false)}
           />
@@ -1285,108 +1370,23 @@ export default function App() {
           </Modal>
         )}
       </Presence>
-      <Presence>
-        {branchManage && (
-          <Modal
-            title={`分支 · ${branchManage.name}`}
-            onClose={() => setBranchManage(null)}
-          >
-            <div className="action-list">
-              {!branchManage.current && (
-                <button
-                  onClick={() => {
-                    checkout(branchManage);
-                    setBranchManage(null);
-                  }}
-                >
-                  <GitBranch size={16} />
-                  检出此分支
-                </button>
-              )}
-              <button
-                onClick={() => {
-                  createBranch(branchManage.ref);
-                  setBranchManage(null);
-                }}
-              >
-                <Plus size={16} />
-                从此分支创建…
-              </button>
-              {!branchManage.current && (
-                <>
-                  <button
-                    onClick={() => {
-                      const b = branchManage;
-                      setBranchManage(null);
-                      confirm(
-                        "合并分支",
-                        `将 ${b.name} 合并到 ${snapshot?.branch}。`,
-                        () => mutate("merge", { ref: b.ref }),
-                      );
-                    }}
-                  >
-                    <GitMerge size={16} />
-                    合并到当前分支
-                  </button>
-                  <button
-                    onClick={() => {
-                      const b = branchManage;
-                      setBranchManage(null);
-                      confirm(
-                        "变基当前分支",
-                        `将 ${snapshot?.branch} 变基到 ${b.name}。这会重写当前分支上的提交。`,
-                        () => mutate("rebase", { ref: b.ref }),
-                      );
-                    }}
-                  >
-                    <GitPullRequestArrow size={16} />
-                    将当前分支变基到此处
-                  </button>
-                </>
-              )}
-              {!branchManage.remote && (
-                <>
-                  <button
-                    onClick={() => {
-                      const b = branchManage;
-                      setBranchManage(null);
-                      setForm({
-                        title: "重命名分支",
-                        fields: [
-                          { key: "newName", label: "新名称", value: b.name },
-                        ],
-                        submitLabel: "重命名",
-                        onSubmit: (v) =>
-                          mutate("branch.rename", { name: b.name, ...v }),
-                      });
-                    }}
-                  >
-                    <FileDiff size={16} />
-                    重命名…
-                  </button>
-                  {!branchManage.current && (
-                    <button
-                      className="red"
-                      onClick={() => {
-                        const b = branchManage;
-                        setBranchManage(null);
-                        confirm(
-                          "删除本地分支",
-                          `删除 ${b.name}。Git 会拒绝删除含有未合并提交的分支。`,
-                          () => mutate("branch.delete", { name: b.name }),
-                        );
-                      }}
-                    >
-                      <X size={16} />
-                      删除分支
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
-          </Modal>
-        )}
-      </Presence>
+      {branchManage && branchManage.repo === repo && (
+        <BranchMenu
+          key={`${branchManage.repo}:${branchManage.branch.ref}`}
+          target={branchManage}
+          snapshot={snapshot}
+          busy={busy}
+          onClose={() => setBranchManage(null)}
+          onAction={branchAction}
+        />
+      )}
+      {comparison && comparison.repo === repo && (
+        <BranchCompare
+          key={`${comparison.repo}:${comparison.branch.ref}:${comparison.mode}`}
+          {...comparison}
+          onClose={() => setComparison(null)}
+        />
+      )}
       <Presence>
         {help && (
           <Modal title="Git IDEA · 快捷键与帮助" onClose={() => setHelp(false)}>

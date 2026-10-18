@@ -19,12 +19,18 @@ export function LogPopup({
   onClose,
   children,
   menu = false,
+  placement = "below",
+  className = "",
+  onOutsideClose,
 }: {
   anchor: RefObject<HTMLElement | null>;
   title: string;
   onClose: () => void;
   children: ReactNode;
   menu?: boolean;
+  placement?: "below" | "right";
+  className?: string;
+  onOutsideClose?: () => void;
 }) {
   const node = useRef<HTMLDivElement>(null);
   const close = useRef(onClose);
@@ -42,13 +48,26 @@ export function LogPopup({
         popup = node.current;
       if (!rect || !popup) return;
       const top =
-        rect.bottom + popup.offsetHeight + 8 <= innerHeight
-          ? rect.bottom + 5
-          : Math.max(8, rect.top - popup.offsetHeight - 5);
-      const left = Math.max(
-        8,
-        Math.min(rect.left, innerWidth - popup.offsetWidth - 8),
-      );
+        placement === "right"
+          ? Math.max(
+              8,
+              Math.min(rect.top, innerHeight - popup.offsetHeight - 8),
+            )
+          : rect.bottom + popup.offsetHeight + 8 <= innerHeight
+            ? rect.bottom + 5
+            : Math.max(8, rect.top - popup.offsetHeight - 5);
+      const left =
+        placement === "right"
+          ? Math.max(
+              8,
+              rect.right + popup.offsetWidth + 8 <= innerWidth
+                ? rect.right + 3
+                : rect.left - popup.offsetWidth - 3,
+            )
+          : Math.max(
+              8,
+              Math.min(rect.left, innerWidth - popup.offsetWidth - 8),
+            );
       setPosition((current) =>
         current.top === top && current.left === left ? current : { top, left },
       );
@@ -58,7 +77,7 @@ export function LogPopup({
       node.current?.querySelector<HTMLElement>(
         "input:not(:disabled),textarea:not(:disabled)",
       ) || node.current?.querySelector<HTMLElement>("button:not(:disabled)");
-    first?.focus();
+    (first || node.current)?.focus();
     const observer = new ResizeObserver(update);
     if (node.current) observer.observe(node.current);
     window.addEventListener("resize", update);
@@ -76,19 +95,20 @@ export function LogPopup({
       )
         previous.focus({ preventScroll: true });
     };
-  }, [anchor]);
+  }, [anchor, placement]);
   return createPortal(
     <>
       <button
         className="log-popup-dismiss"
         tabIndex={-1}
         aria-label={`关闭${title}`}
-        onClick={onClose}
+        onClick={onOutsideClose || onClose}
       />
       <div
         ref={node}
-        className={`log-popup ${menu ? "log-action-menu" : ""}`}
+        className={`log-popup ${menu ? "log-action-menu" : ""} ${className}`}
         role={menu ? "menu" : "dialog"}
+        tabIndex={-1}
         aria-label={title}
         style={position}
         onKeyDown={(event) => {
@@ -101,6 +121,11 @@ export function LogPopup({
             menu &&
             ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)
           ) {
+            if (
+              event.target instanceof Element &&
+              event.target.closest("input,textarea")
+            )
+              return;
             const buttons = Array.from(
               node.current?.querySelectorAll<HTMLButtonElement>(
                 "button:not(:disabled)",
@@ -119,6 +144,7 @@ export function LogPopup({
                       buttons.length) %
                     buttons.length;
             event.preventDefault();
+            event.stopPropagation();
             buttons[next]?.focus();
           }
           if (event.key === "Tab") {

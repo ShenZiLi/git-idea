@@ -1569,6 +1569,99 @@ hr {
 .branch-row.current > button:first-child {
   color: var(--green);
 }
+.branch-row > button:first-child:focus-visible {
+  outline-offset: -2px;
+  border-radius: 3px;
+}
+.branch-context-anchor {
+  position: fixed;
+  height: 1px;
+  width: 1px;
+  pointer-events: none;
+}
+.branch-context-menu.log-action-menu {
+  width: 350px;
+  padding: 6px;
+  border-radius: 9px;
+}
+.branch-context-menu.log-action-menu > button {
+  min-height: 31px;
+  gap: 8px;
+  padding-inline: 12px;
+}
+.branch-context-menu > button > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.branch-context-menu > button > :is(kbd, svg) {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.branch-context-menu > button > kbd {
+  font-family: inherit;
+  color: var(--faint);
+  font-size: 11px;
+}
+.branch-context-menu > .menu-divider {
+  margin: 7px 4px;
+}
+.branch-menu-state {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 10px;
+  color: var(--red);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.branch-menu-state > button {
+  align-self: flex-start;
+}
+.branch-tracking-menu.log-action-menu {
+  width: 305px;
+}
+.branch-tracking-heading {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 5px 8px;
+  overflow-wrap: anywhere;
+}
+.branch-tracking-search {
+  height: 30px;
+  margin: 5px 5px 7px;
+  padding: 0 7px;
+  gap: 6px;
+}
+.branch-tracking-search > input {
+  font-size: 12px;
+}
+.branch-tracking-options {
+  max-height: min(340px, 45vh);
+  overflow: auto;
+}
+.branch-tracking-menu button[role="menuitemradio"] {
+  min-height: 30px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  border-radius: 4px;
+  padding: 5px 10px 5px 25px;
+  display: flex;
+  position: relative;
+  justify-content: flex-start;
+  text-align: left;
+  font-size: 12px;
+}
+.branch-tracking-menu button[role="menuitemradio"] > svg {
+  position: absolute;
+  left: 7px;
+  color: var(--blue);
+}
+@media (hover: hover) and (pointer: fine) {
+  .branch-tracking-menu button[role="menuitemradio"]:hover:not(:disabled) {
+    background: var(--selection);
+  }
+}
 .branch-row > button:first-child {
   background: transparent;
   border: 0;

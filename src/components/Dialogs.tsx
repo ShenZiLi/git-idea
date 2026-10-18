@@ -530,11 +530,18 @@ export function BranchSwitcher({
   checkout,
   create,
   onClose,
+  manage,
 }: {
   snapshot: RepoSnapshot;
   checkout: (branch: Branch) => void;
   create: () => void;
   onClose: () => void;
+  manage?: (
+    branch: Branch,
+    anchor: HTMLElement,
+    point?: { x: number; y: number },
+    initialAction?: string,
+  ) => void;
 }) {
   const [search, setSearch] = useState("");
   return (
@@ -574,6 +581,40 @@ export function BranchSwitcher({
                 <button
                   key={branch.ref}
                   className={`switcher-row ${branch.current ? "current" : ""}`}
+                  onContextMenu={(event) => {
+                    if (manage) {
+                      event.preventDefault();
+                      manage(branch, event.currentTarget, {
+                        x: event.clientX,
+                        y: event.clientY,
+                      });
+                      onClose();
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    if (
+                      manage &&
+                      (event.key === "ContextMenu" ||
+                        (event.key === "F10" && event.shiftKey) ||
+                        event.key === "F2" ||
+                        event.key === "Delete")
+                    ) {
+                      event.preventDefault();
+                      const bounds =
+                        event.currentTarget.getBoundingClientRect();
+                      manage(
+                        branch,
+                        event.currentTarget,
+                        { x: bounds.left, y: bounds.bottom },
+                        event.key === "F2"
+                          ? "rename"
+                          : event.key === "Delete"
+                            ? "delete"
+                            : undefined,
+                      );
+                      onClose();
+                    }
+                  }}
                   onClick={() => {
                     if (!branch.current) checkout(branch);
                     onClose();
