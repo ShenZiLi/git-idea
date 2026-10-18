@@ -30,6 +30,13 @@ import {
   mutateWorkspace,
 } from "./commit-workspace.ts";
 import { WORKSPACE_ACTIONS } from "../shared/commit-workspace.ts";
+import {
+  commitScope,
+  commitScopePreview,
+  recoverScopedCommit,
+} from "./commit-index.ts";
+import { pendingOperations } from "./commit-workspace.ts";
+import { withWorkspace, workspaceRoot, validId } from "./workspace-io.ts";
 
 export function createApi(
   options: { preferencesPath?: string; defaultRepo?: string } = {},
@@ -135,6 +142,10 @@ export function createApi(
         return branchInfo(repo, p);
       case "commitWorkspace":
         return commitWorkspace(repo);
+      case "commitScopePreview":
+        return commitScopePreview(repo, p);
+      case "operationRecovery":
+        return pendingOperations(await workspaceRoot(repo));
       case "ignoredFiles":
         return ignoredFiles(repo, p);
       case "modules":
@@ -167,6 +178,11 @@ export function createApi(
       case "commitDetail":
         return commitDetail(repo, String(p.hash || ""));
       case "mutate":
+        if (p.action === "commit.scope") return commitScope(repo, p);
+        if (p.action === "operation.recover")
+          return withWorkspace(repo, (root) =>
+            recoverScopedCommit(repo, root, validId(p.id)),
+          );
         if (
           (WORKSPACE_ACTIONS as readonly string[]).includes(
             String(p.action || ""),

@@ -146,8 +146,9 @@ export async function assertOrdinary(
   repo: string,
   selected: string[],
   allowUntracked = false,
+  allowEmpty = false,
 ) {
-  if (!selected.length || selected.length > 10000)
+  if ((!selected.length && !allowEmpty) || selected.length > 10000)
     throw new Error("请选择 1 至 10,000 个文件");
   const all = await changes(repo);
   if (all.some((item) => item.conflict)) throw new Error("请先解决仓库冲突");

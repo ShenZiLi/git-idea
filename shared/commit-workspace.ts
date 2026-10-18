@@ -1,4 +1,4 @@
-import type { Change, DiffData } from "./types";
+import type { Change, DiffData } from "./types.ts";
 
 export type CommitScope =
   | { kind: "all-staged" }

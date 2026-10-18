@@ -50,6 +50,7 @@ import { BranchMenu, type BranchMenuTarget } from "./components/BranchMenu";
 import { BranchCompare } from "./components/BranchCompare";
 import type { BranchInfo } from "../shared/branches";
 import { performBranchAction } from "./branch-actions";
+import type { OperationResult } from "../shared/commit-workspace";
 import {
   CommitDetails,
   ConsolePanel,
@@ -285,13 +286,26 @@ export default function App() {
             "文件尚未保存，已暂停 Git 操作，请先处理编辑区的保存提示。",
           );
         if (target !== repoRef.current) return false;
-        const output = await request<string>("mutate", target, {
-          ...params,
-          action,
-        });
-        completed = true;
-        notify(output.trim().slice(0, 500) || "操作成功");
-        return true;
+        const output = await request<string | OperationResult>(
+          "mutate",
+          target,
+          {
+            ...params,
+            action,
+          },
+        );
+        completed =
+          typeof output === "string" ||
+          output.state === "completed" ||
+          !!output.commitHash;
+        notify(
+          (typeof output === "string" ? output.trim() : output.message).slice(
+            0,
+            500,
+          ) || "操作成功",
+          typeof output !== "string" && output.state !== "completed",
+        );
+        return completed;
       } catch (e) {
         notify((e as Error).message, true);
         return false;

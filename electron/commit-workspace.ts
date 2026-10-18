@@ -26,7 +26,7 @@ export function emptyWorkspace(): CommitWorkspace {
     revision: 0,
     activeListId: "default",
     lists: [{ id: "default", name: "更改", description: "", builtin: true }],
-    assignments: {},
+    assignments: Object.create(null) as Record<string, string>,
     view: { grouping: "flat", showIgnored: false },
     moduleRoots: [],
     drafts: {},
@@ -126,6 +126,7 @@ export async function readWorkspaceUnlocked(
     )
       throw invalid();
   }
+  value.assignments = Object.assign(Object.create(null), value.assignments);
   return value as unknown as CommitWorkspace;
 }
 export async function saveWorkspaceUnlocked(
@@ -195,7 +196,7 @@ export async function commitWorkspace(repo: string): Promise<WorkspaceState> {
   return withWorkspace(repo, async (root) => {
     const workspace = await readWorkspaceUnlocked(repo, root),
       all = (await changes(repo)).filter((item) => item.index !== "?");
-    const assignments: Record<string, string> = {};
+    const assignments: Record<string, string> = Object.create(null);
     for (const item of all)
       assignments[item.path] =
         workspace.assignments[item.path] ||
