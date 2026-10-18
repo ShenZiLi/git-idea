@@ -16,10 +16,15 @@ import { promises as fs } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { createApi } from "./api";
 import { normalizeUiScale } from "../shared/types";
-import type { Bootstrap, Preferences } from "../shared/types";
+import type { Bootstrap, DiffData, Preferences } from "../shared/types";
 import { repository } from "./git";
 import { archivedFileBytes } from "./shelves";
-import { CLIPBOARD_LIMIT, preparePatch, readonlyDiff } from "./patches";
+import {
+  CLIPBOARD_LIMIT,
+  discardPatch,
+  preparePatch,
+  readonlyDiff,
+} from "./patches";
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -50,9 +55,17 @@ app.whenReady().then(async () => {
       process.env.GIT_IDEA_PREFERENCES ||
       path.join(app.getPath("userData"), "preferences.json"),
     defaultRepo: process.env.GIT_IDEA_REPO,
-    trashItem: absolute => shell.trashItem(absolute),
+    trashItem: (absolute) => shell.trashItem(absolute),
   });
-  const readers = new Map<number, { id: string; data: unknown; preferences: Preferences; window: BrowserWindow }>();
+  const readers = new Map<
+    number,
+    {
+      id: string;
+      data: DiffData;
+      preferences: Preferences;
+      window: BrowserWindow;
+    }
+  >();
   const trusted = (
     event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent,
   ) => {
@@ -68,7 +81,12 @@ app.whenReady().then(async () => {
   ipcMain.handle("git:request", async (event, request) => {
     const reader = readers.get(event.sender.id);
     if (reader) {
-      if (event.senderFrame !== event.sender.mainFrame || request?.method !== "readonlyBootstrap" || request.params?.id !== reader.id) throw new Error("此窗口仅支持读取已打开的差异");
+      if (
+        event.senderFrame !== event.sender.mainFrame ||
+        request?.method !== "readonlyBootstrap" ||
+        request.params?.id !== reader.id
+      )
+        throw new Error("此窗口仅支持读取已打开的差异");
       return { data: reader.data, preferences: reader.preferences };
     }
     trusted(event);
@@ -85,38 +103,115 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle("git:save-patch", async (event, payload) => {
     trusted(event);
-    const repo = await repository(payload.repo), patch = await preparePatch(repo, payload.params || {});
-    const result = await dialog.showSaveDialog(window!, { title: "导出补丁", defaultPath: patch.name, filters: [{ name: "Git 补丁", extensions: ["patch"] }] });
-    if (result.canceled || !result.filePath) return null;
-    await fs.copyFile(patch.file, result.filePath);
-    return result.filePath;
+    const repo = await repository(payload.repo),
+      patch = await preparePatch(repo, payload.params || {});
+    try {
+      const result = await dialog.showSaveDialog(window!, {
+        title: "导出补丁",
+        defaultPath: patch.name,
+        filters: [{ name: "Git 补丁", extensions: ["patch"] }],
+      });
+      if (result.canceled || !result.filePath) return null;
+      const relative = path.relative(
+        path.dirname(patch.file),
+        path.resolve(result.filePath),
+      );
+      if (
+        !relative ||
+        (relative !== ".." &&
+          !relative.startsWith(`..${path.sep}`) &&
+          !path.isAbsolute(relative))
+      )
+        throw new Error("请将补丁保存到应用内部临时目录之外");
+      await fs.copyFile(patch.file, result.filePath);
+      return result.filePath;
+    } finally {
+      await discardPatch(repo, patch.file).catch(() => {});
+    }
   });
   ipcMain.handle("git:copy-patch", async (event, payload) => {
     trusted(event);
-    const patch = await preparePatch(await repository(payload.repo), payload.params || {});
-    if (patch.size > CLIPBOARD_LIMIT) throw new Error("补丁超过 8 MB，请导出到文件");
-    clipboard.writeText(await fs.readFile(patch.file, "utf8"));
-    return patch.size;
+    const repo = await repository(payload.repo),
+      patch = await preparePatch(repo, payload.params || {});
+    try {
+      if (patch.size > CLIPBOARD_LIMIT)
+        throw new Error("补丁超过 8 MB，请导出到文件");
+      clipboard.writeText(await fs.readFile(patch.file, "utf8"));
+      return patch.size;
+    } finally {
+      await discardPatch(repo, patch.file).catch(() => {});
+    }
   });
   ipcMain.handle("git:save-archive", async (event, payload) => {
     trusted(event);
-    const file = await archivedFileBytes(await repository(payload.repo), payload.params || {});
-    const result = await dialog.showSaveDialog(window!, { title: "另存归档文件", defaultPath: file.name });
+    const file = await archivedFileBytes(
+      await repository(payload.repo),
+      payload.params || {},
+    );
+    const result = await dialog.showSaveDialog(window!, {
+      title: "另存归档文件",
+      defaultPath: file.name,
+    });
     if (result.canceled || !result.filePath) return null;
     await fs.writeFile(result.filePath, file.data);
     return result.filePath;
   });
+  ipcMain.handle("git:copy-readonly", (event) => {
+    const reader = readers.get(event.sender.id);
+    if (!reader || event.senderFrame !== event.sender.mainFrame)
+      throw new Error("此复制入口仅供已注册的只读差异窗口使用");
+    const data = reader.data;
+    if (data.binary || data.truncated)
+      throw new Error("二进制或超限差异不能复制为文本");
+    const text =
+      data.raw ||
+      `${data.beforeLabel}\n${data.before}\n\n${data.afterLabel}\n${data.after}`;
+    if (Buffer.byteLength(text, "utf8") > CLIPBOARD_LIMIT)
+      throw new Error("差异超过 8 MB，请另存归档文件");
+    clipboard.writeText(text);
+  });
   ipcMain.handle("git:diff-window", async (event, payload) => {
     trusted(event);
-    const data = await readonlyDiff(await repository(payload.repo), payload.source || {});
-    const { preferences } = await api({ method: "bootstrap" }) as Bootstrap;
-    const id = randomUUID(), reader = new BrowserWindow({ width: 1200, height: 800, minWidth: 650, minHeight: 400, frame: false, title: "只读差异", backgroundColor: windowBackground(preferences.theme), webPreferences: { zoomFactor: normalizeUiScale(preferences.uiScale) / 100, preload: path.join(__dirname, "preload.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true } });
-    readers.set(reader.webContents.id, { id, data, preferences, window: reader });
+    const data = await readonlyDiff(
+      await repository(payload.repo),
+      payload.source || {},
+    );
+    const { preferences } = (await api({ method: "bootstrap" })) as Bootstrap;
+    const id = randomUUID(),
+      reader = new BrowserWindow({
+        width: 1200,
+        height: 800,
+        minWidth: 650,
+        minHeight: 400,
+        frame: false,
+        title: "只读差异",
+        backgroundColor: windowBackground(preferences.theme),
+        webPreferences: {
+          zoomFactor: normalizeUiScale(preferences.uiScale) / 100,
+          preload: path.join(__dirname, "preload.cjs"),
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+        },
+      });
+    readers.set(reader.webContents.id, {
+      id,
+      data,
+      preferences,
+      window: reader,
+    });
     const contentsId = reader.webContents.id;
     reader.on("closed", () => readers.delete(contentsId));
     reader.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-    reader.webContents.on("will-navigate", event => event.preventDefault());
-    await reader.loadURL(`${devURL || appURL + "/"}${(devURL || "").includes("?") ? "&" : "?"}diffWindow=${id}`);
+    reader.webContents.on("will-navigate", (event) => event.preventDefault());
+    try {
+      await reader.loadURL(
+        `${devURL || appURL + "/"}${(devURL || "").includes("?") ? "&" : "?"}diffWindow=${id}`,
+      );
+    } catch (error) {
+      reader.destroy();
+      throw error;
+    }
   });
   ipcMain.handle("git:choose-directory", async (event) => {
     trusted(event);
@@ -128,7 +223,11 @@ app.whenReady().then(async () => {
   });
   ipcMain.on("window:action", (event, action) => {
     const reader = readers.get(event.sender.id);
-    if (reader) { if (event.senderFrame === event.sender.mainFrame && action === "close") reader.window.close(); return; }
+    if (reader) {
+      if (event.senderFrame === event.sender.mainFrame && action === "close")
+        reader.window.close();
+      return;
+    }
     trusted(event);
     if (action === "close") window?.close();
     else if (action === "minimize") window?.minimize();

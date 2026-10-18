@@ -51,6 +51,7 @@ import {
 import { pendingOperations } from "./commit-workspace.ts";
 import { withWorkspace, workspaceRoot, validId } from "./workspace-io.ts";
 import { patchPreview, readonlyDiff } from "./patches.ts";
+import { stashFiles, stashDiff } from "./stashes.ts";
 
 export function createApi(
   options: {
@@ -154,8 +155,14 @@ export function createApi(
     }
     const repo = await repository(request.repo || "");
     switch (request.method) {
-      case "patchPreview": return patchPreview(repo, p);
-      case "readonlyDiff": return readonlyDiff(repo, p);
+      case "stashFiles":
+        return stashFiles(repo, p);
+      case "stashDiff":
+        return stashDiff(repo, p);
+      case "patchPreview":
+        return patchPreview(repo, p);
+      case "readonlyDiff":
+        return readonlyDiff(repo, p);
       case "snapshot":
         return snapshot(repo, p);
       case "branchInfo":

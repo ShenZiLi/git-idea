@@ -93,7 +93,16 @@ export async function workspacePreview(
       head = await headHash(repo),
       index = indexState(await readOptional(await indexFile(repo)));
     const files = [];
-    for (const value of [...new Set(p.paths)]) {
+    const requested = new Set(p.paths);
+    for (const change of await changes(repo))
+      if (
+        change.oldPath &&
+        (requested.has(change.path) || requested.has(change.oldPath))
+      ) {
+        requested.add(change.path);
+        requested.add(change.oldPath);
+      }
+    for (const value of requested) {
       if (typeof value !== "string") throw new Error("无效的文件范围");
       const file = relativeFile(repo, value),
         state = await diskState(repo, file);

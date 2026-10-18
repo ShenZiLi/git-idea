@@ -31,7 +31,66 @@ import {
   withIndexLock,
   readOperation,
   loadState,
+  type WorkspaceOperation,
 } from "./workspace-operations.ts";
+
+async function currentRef(repo: string) {
+  return (
+    await git(repo, ["symbolic-ref", "--quiet", "HEAD"], undefined, [0, 1])
+  ).trim();
+}
+
+async function ownedCommit(repo: string, record: WorkspaceOperation) {
+  if (
+    !Array.isArray(record.commitParents) ||
+    typeof record.commitRef !== "string"
+  )
+    throw new Error("恢复记录缺少提交归属验证上下文，请保留材料手工核对");
+  const prefix = `Git IDEA scoped ${record.id}`;
+  const reflog = await git(
+    repo,
+    [
+      "reflog",
+      "show",
+      "--fixed-strings",
+      `--grep-reflog=${prefix}`,
+      "--format=%H%x00%gs",
+      "HEAD",
+    ],
+    undefined,
+    [0, 128],
+  );
+  const hashes = [
+    ...new Set(
+      reflog
+        .split("\n")
+        .map((row) => row.split("\0"))
+        .filter(
+          (row) =>
+            /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/.test(row[0]) &&
+            (row[1] === prefix || row[1]?.startsWith(`${prefix}: `)),
+        )
+        .map((row) => row[0]),
+    ),
+  ];
+  const matching: string[] = [];
+  for (const hash of hashes) {
+    const parents = (await git(repo, ["show", "-s", "--format=%P", hash]))
+      .trim()
+      .split(" ")
+      .filter(Boolean);
+    if (
+      parents.length === record.commitParents.length &&
+      parents.every((parent, index) => parent === record.commitParents![index])
+    )
+      matching.push(hash);
+  }
+  return {
+    hash:
+      hashes.length === 1 && matching.length === 1 ? matching[0] : undefined,
+    observed: hashes.length > 0,
+  };
+}
 
 export async function filterPrivateIndex(
   repo: string,
@@ -178,7 +237,8 @@ export async function commitScope(
       affectedPaths: record.paths,
       ...(record.commitHash ? { commitHash: record.commitHash } : {}),
     });
-    let committed = false;
+    let committed = false,
+      attempted = false;
     try {
       if (
         typeof p.expectedHead !== "string" ||
@@ -190,6 +250,16 @@ export async function commitScope(
       const entries = await indexEntries(repo);
       if (entries.some((entry) => entry.stage))
         throw new Error("存在未解决的索引冲突");
+      record.commitRef = await currentRef(repo);
+      record.commitParents =
+        p.amend === true && record.baseHead
+          ? (await git(repo, ["show", "-s", "--format=%P", record.baseHead]))
+              .trim()
+              .split(" ")
+              .filter(Boolean)
+          : record.baseHead
+            ? [record.baseHead]
+            : [];
       await seedIndex(repo, privateIndex, record.baseHead);
       await putEntries(repo, privateIndex, paths, entries);
       await filterPrivateIndex(repo, privateIndex, record.baseHead, paths);
@@ -209,16 +279,21 @@ export async function commitScope(
       return await withIndexLock(repo, async (lock) => {
         if (
           (await headHash(repo)) !== record.baseHead ||
+          (await currentRef(repo)) !== record.commitRef ||
           !stateEquals(
             indexState(await readOptional(await indexFile(repo))),
             record.beforeIndex,
           )
         )
           throw new Error("HEAD 或索引已变化，未创建提交，请刷新后重试");
+        let commandError: unknown;
+        attempted = true;
         try {
           await git(
             repo,
             [
+              "-c",
+              "core.logAllRefUpdates=true",
               "commit",
               ...(p.amend ? ["--amend"] : []),
               "-m",
@@ -232,20 +307,35 @@ export async function commitScope(
             },
           );
         } catch (error) {
-          const after = await headHash(repo);
-          if (after && after !== record.baseHead) {
-            committed = true;
-            record.commitHash = after;
-            record.state = "committed-index-pending";
-            record.message = `已创建提交 ${after.slice(0, 12)}，但提交命令或索引后处理未完成，请先恢复。${(error as Error).message}`;
-            await saveOperation(root, record);
-            return result("committed-index-pending", record.message);
+          commandError = error;
+        }
+        const ownership = await ownedCommit(repo, record);
+        if (!ownership.hash) {
+          if (
+            commandError &&
+            !ownership.observed &&
+            (await headHash(repo)) === record.baseHead &&
+            (await currentRef(repo)) === record.commitRef
+          ) {
+            attempted = false;
+            throw commandError;
           }
-          throw error;
+          throw new Error(
+            `无法从唯一操作日志和父提交确认本次提交归属，未同步索引；请先检查恢复材料，勿重复提交。${commandError ? `\n${(commandError as Error).message}` : ""}`,
+          );
         }
         committed = true;
-        record.commitHash = await headHash(repo);
+        record.commitHash = ownership.hash;
         record.state = "committed-index-pending";
+        if (
+          commandError ||
+          (await headHash(repo)) !== record.commitHash ||
+          (await currentRef(repo)) !== record.commitRef
+        ) {
+          record.message = `已确认本次提交 ${record.commitHash.slice(0, 12)}，但提交命令或当前分支状态已变化，原索引尚未同步；请先恢复，勿重复提交。${commandError ? `\n${(commandError as Error).message}` : ""}`;
+          await saveOperation(root, record);
+          return result("committed-index-pending", record.message);
+        }
         record.message = `已创建提交 ${record.commitHash.slice(0, 12)}，正在同步原索引`;
         await saveOperation(root, record);
         const actual = (
@@ -279,23 +369,32 @@ export async function commitScope(
           indexState(await readOptional(publishedIndex)),
         );
         await saveOperation(root, record);
-        if ((await headHash(repo)) !== record.commitHash)
+        const candidate = await loadState(directory, record.afterIndex);
+        if (
+          (await headHash(repo)) !== record.commitHash ||
+          (await currentRef(repo)) !== record.commitRef
+        )
           throw new Error("提交后 HEAD 再次变化，停止同步索引");
-        await lock.publish(
-          (await loadState(directory, record.afterIndex)).data!,
-        );
+        await lock.publish(candidate.data!);
         record.state = "completed";
         record.message = `已提交 ${record.commitHash.slice(0, 12)}；其他文件的暂存内容已保留。`;
         await saveOperation(root, record);
         return result("completed", record.message);
       });
     } catch (error) {
-      record.state = committed ? "committed-index-pending" : "completed";
+      record.state = committed
+        ? "committed-index-pending"
+        : attempted
+          ? "recovery-required"
+          : "completed";
       record.message = committed
         ? `提交 ${record.commitHash?.slice(0, 12)} 已创建，索引同步待恢复，不能重复提交。${(error as Error).message}`
-        : `未创建提交：${(error as Error).message}`;
+        : attempted
+          ? `提交归属尚未确认，已保留索引及日志，必须先恢复，不能重复提交。${(error as Error).message}`
+          : `未创建提交：${(error as Error).message}`;
       await saveOperation(root, record);
       if (committed) return result("committed-index-pending", record.message);
+      if (attempted) return result("recovery-required", record.message);
       throw error;
     } finally {
       if (record.state === "completed") {
@@ -341,8 +440,16 @@ export async function recoverScopedCommit(
   const { record, directory } = await readOperation(root, repo, id);
   if (record.kind !== "commit") throw new Error("不是提交恢复记录");
   const current = await headHash(repo);
-  if (!record.commitHash) {
-    if (current === record.baseHead) {
+  if ((await currentRef(repo)) !== record.commitRef)
+    throw new Error("当前分支引用已改变，保留材料并拒绝恢复到其他分支");
+  const ownership = await ownedCommit(repo, record);
+  if (!ownership.hash) {
+    if (
+      record.state !== "recovery-required" &&
+      !record.commitHash &&
+      !ownership.observed &&
+      current === record.baseHead
+    ) {
       record.state = "completed";
       record.message = "尚未创建提交，已关闭中断记录";
       await saveOperation(root, record);
@@ -353,22 +460,18 @@ export async function recoverScopedCommit(
         affectedPaths: record.paths,
       };
     }
-    const reflog = await git(repo, [
-      "reflog",
-      "-1",
-      "--format=%H%x00%gs",
-      "HEAD",
-    ]);
-    if (!reflog.startsWith(`${current}\0Git IDEA scoped ${id}`))
-      throw new Error(
-        "HEAD 可能已变化，无法确认提交归属；保留材料，不自动覆盖索引",
-      );
-    record.commitHash = current;
+    throw new Error("无法唯一确认操作日志及父提交，保留材料，不自动覆盖索引");
   }
+  if (record.commitHash && record.commitHash !== ownership.hash)
+    throw new Error("记录中的提交与操作日志不符，保留材料并拒绝覆盖");
+  record.commitHash = ownership.hash;
   if (current !== record.commitHash)
     throw new Error("HEAD 已有后续变化，不能自动恢复索引");
   return withIndexLock(repo, async (lock) => {
-    if ((await headHash(repo)) !== record.commitHash)
+    if (
+      (await headHash(repo)) !== record.commitHash ||
+      (await currentRef(repo)) !== record.commitRef
+    )
       throw new Error("获取索引锁前 HEAD 已变化，保留恢复材料并拒绝覆盖");
     const real = indexState(await readOptional(await indexFile(repo)));
     if (
@@ -413,7 +516,10 @@ export async function recoverScopedCommit(
       await removePrivateIndex(candidate);
     }
     const candidate = await loadState(directory, record.afterIndex);
-    if ((await headHash(repo)) !== record.commitHash)
+    if (
+      (await headHash(repo)) !== record.commitHash ||
+      (await currentRef(repo)) !== record.commitRef
+    )
       throw new Error("恢复期间 HEAD 已变化，保留候选索引，不会发布");
     await lock.publish(candidate.data!);
     record.state = "completed";

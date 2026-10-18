@@ -45,6 +45,8 @@ export interface WorkspaceOperation {
   message: string;
   baseHead: string;
   commitHash?: string;
+  commitParents?: string[];
+  commitRef?: string;
   beforeIndex: StoredState;
   afterIndex?: StoredState;
   files: OperationFile[];

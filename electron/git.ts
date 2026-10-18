@@ -618,7 +618,7 @@ export async function snapshot(
       "refs/tags",
     ]),
     git(repo, ["remote"]),
-    git(repo, ["stash", "list", "--format=%gd%x00%gs%x00%aI"]),
+    git(repo, ["stash", "list", "--format=%gd%x00%gs%x00%aI%x00%H"]),
     historyPage(repo, params),
     config(repo, "user.name"),
     config(repo, "user.email"),
@@ -705,8 +705,8 @@ export async function snapshot(
       .split("\n")
       .filter(Boolean)
       .map((row) => {
-        const [ref, message, date] = row.split("\0");
-        return { ref, message, date };
+        const [ref, message, date, hash] = row.split("\0");
+        return { ref, message, date, hash };
       }),
     commits: page.commits,
     head: parseLog(headLog)[0] || null,
@@ -1273,9 +1273,30 @@ export async function mutate(
       case "stash.apply":
       case "stash.pop":
       case "stash.drop": {
-        const ref = string(params, "ref");
-        if (!/^stash@\{\d+\}$/.test(ref)) throw new Error("无效的储藏引用");
-        return git(repo, ["stash", action.split(".")[1], ref]);
+        const { resolveStash } = await import("./stashes.ts");
+        const selected = await resolveStash(repo, params.hash);
+        if (action === "stash.apply")
+          return git(repo, ["stash", "apply", selected.hash]);
+        if (action === "stash.pop") {
+          let output: string;
+          try {
+            output = await git(repo, ["stash", "apply", selected.hash]);
+          } catch (error) {
+            throw new Error(
+              `储藏应用未完整完成，工作区可能已包含部分内容；未尝试删除储藏。请检查冲突后处理，不要直接重复应用。\n${(error as Error).message}`,
+            );
+          }
+          try {
+            const current = await resolveStash(repo, selected.hash);
+            await git(repo, ["stash", "drop", current.ref]);
+          } catch (error) {
+            throw new Error(
+              `储藏 ${selected.hash.slice(0, 12)} 的内容已应用到工作区，但后续删除未确认完成。请刷新储藏列表核对，勿再次应用。\n${(error as Error).message}`,
+            );
+          }
+          return output || "储藏内容已应用并移除原记录";
+        }
+        return git(repo, ["stash", "drop", selected.ref]);
       }
       case "fetch":
         return git(repo, ["fetch", "--all", "--prune"]);
