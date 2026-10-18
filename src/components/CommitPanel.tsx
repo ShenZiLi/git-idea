@@ -26,6 +26,7 @@ import { CommitTree } from "./CommitTree";
 import { ChangeListDialog, ModuleRootsDialog } from "./CommitWorkspaceDialogs";
 import { ShelfPanel } from "./ShelfPanel";
 import { RecoveryPanel } from "./RecoveryPanel";
+import { WorkspaceLockNotice } from "./WorkspaceLockNotice";
 import { ReadonlyDiff } from "./BranchCompare";
 import { Empty, IconButton } from "./ui";
 import { isStaged, isUnstaged } from "./CommitFiles";
@@ -140,6 +141,20 @@ export function CommitPanel({
   useEffect(() => {
     void load();
   }, [load, s]);
+  useEffect(() => {
+    const focus = () => {
+      setTab("commit");
+      setTimeout(
+        () =>
+          document
+            .querySelector<HTMLTextAreaElement>(".commit-form textarea")
+            ?.focus(),
+        0,
+      );
+    };
+    window.addEventListener("git-idea:focus-commit", focus);
+    return () => window.removeEventListener("git-idea:focus-commit", focus);
+  }, []);
   async function run(action: string, params: Record<string, unknown> = {}) {
     if (!s || repoRef.current !== s.root) return false;
     const repo = s.root,
@@ -415,6 +430,14 @@ export function CommitPanel({
           {error}
           <button onClick={() => void load()}>重试</button>
         </div>
+      )}
+      {error && s && (
+        <WorkspaceLockNotice
+          key={s.root}
+          repo={s.root}
+          refresh={load}
+          confirm={confirm}
+        />
       )}
       {!!workspace?.pending.length && (
         <div className="operation-banner">

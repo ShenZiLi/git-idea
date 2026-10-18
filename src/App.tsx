@@ -760,6 +760,7 @@ export default function App() {
   }
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
       if (!e.ctrlKey && !e.metaKey) return;
       if (e.key.toLowerCase() === "o") {
         e.preventDefault();
@@ -769,15 +770,7 @@ export default function App() {
         if (!busyRef.current) void refresh();
       } else if (e.key.toLowerCase() === "k") {
         e.preventDefault();
-        setTimeout(
-          () =>
-            document
-              .querySelector<HTMLTextAreaElement>(
-                'textarea[aria-label="提交信息"]',
-              )
-              ?.focus(),
-          0,
-        );
+        window.dispatchEvent(new Event("git-idea:focus-commit"));
       } else if (e.key === "9") {
         e.preventDefault();
         setLogVisible((v) => !v);
