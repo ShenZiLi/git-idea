@@ -815,6 +815,8 @@ export default function App() {
     localStorage.setItem("git-idea-panels", JSON.stringify(widths));
   }, [widths]);
   const tab = tabs.find((t) => t.id === activeTab) || tabs.at(-1);
+  // Weights above 1 keep fractional tracks filling the grid when a minimum binds.
+  const upperRowWeight = (widths.top || 0.55) * 100;
   const layout = {
     "--left-width": `${widths.left || 252}px`,
     "--right-width": `${widths.right || 328}px`,
@@ -1107,7 +1109,7 @@ export default function App() {
           ref={workbench}
           style={{
             gridTemplateRows: logVisible
-              ? `minmax(250px, ${widths.top || 0.55}fr) 5px minmax(200px, ${1 - (widths.top || 0.55)}fr)`
+              ? `minmax(250px, ${upperRowWeight}fr) 5px minmax(200px, ${100 - upperRowWeight}fr)`
               : "minmax(0, 1fr)",
           }}
         >
