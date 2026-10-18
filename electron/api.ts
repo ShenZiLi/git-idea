@@ -29,7 +29,20 @@ import {
   modules,
   mutateWorkspace,
 } from "./commit-workspace.ts";
-import { WORKSPACE_ACTIONS } from "../shared/commit-workspace.ts";
+import {
+  WORKSPACE_ACTIONS,
+  SHELF_ACTIONS,
+} from "../shared/commit-workspace.ts";
+import {
+  shelves,
+  shelfDetail,
+  shelfDiff,
+  mutateShelf,
+  recoveryRecords,
+  operationDiff,
+  workspacePreview,
+  archiveFileAction,
+} from "./shelves.ts";
 import {
   commitScope,
   commitScopePreview,
@@ -39,7 +52,11 @@ import { pendingOperations } from "./commit-workspace.ts";
 import { withWorkspace, workspaceRoot, validId } from "./workspace-io.ts";
 
 export function createApi(
-  options: { preferencesPath?: string; defaultRepo?: string } = {},
+  options: {
+    preferencesPath?: string;
+    defaultRepo?: string;
+    trashItem?: (absolutePath: string) => Promise<void>;
+  } = {},
 ) {
   const preferencesPath =
     options.preferencesPath ||
@@ -145,7 +162,17 @@ export function createApi(
       case "commitScopePreview":
         return commitScopePreview(repo, p);
       case "operationRecovery":
-        return pendingOperations(await workspaceRoot(repo));
+        return recoveryRecords(repo);
+      case "workspacePreview":
+        return workspacePreview(repo, p);
+      case "shelves":
+        return shelves(repo, p);
+      case "shelfDetail":
+        return shelfDetail(repo, p);
+      case "shelfDiff":
+        return shelfDiff(repo, p);
+      case "operationDiff":
+        return operationDiff(repo, p);
       case "ignoredFiles":
         return ignoredFiles(repo, p);
       case "modules":
@@ -179,10 +206,12 @@ export function createApi(
         return commitDetail(repo, String(p.hash || ""));
       case "mutate":
         if (p.action === "commit.scope") return commitScope(repo, p);
-        if (p.action === "operation.recover")
-          return withWorkspace(repo, (root) =>
-            recoverScopedCommit(repo, root, validId(p.id)),
-          );
+        if (p.action === "file.trash" && options.trashItem)
+          return archiveFileAction(repo, "file.trash", p, options.trashItem);
+        if (
+          (SHELF_ACTIONS as readonly string[]).includes(String(p.action || ""))
+        )
+          return mutateShelf(repo, String(p.action), p);
         if (
           (WORKSPACE_ACTIONS as readonly string[]).includes(
             String(p.action || ""),

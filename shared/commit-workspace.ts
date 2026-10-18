@@ -74,6 +74,19 @@ export interface ShelfRecord {
   state: "active" | "applied" | "deleted";
   deletedAt?: string;
   files: ShelfFile[];
+  revision: number;
+  corrupted?: string;
+}
+export interface ShelfPage {
+  records: ShelfRecord[];
+  total: number;
+  hasMore: boolean;
+}
+export interface WorkspacePreview {
+  revision: number;
+  head: string;
+  index: string;
+  files: { path: string; sha256: string; exists: boolean; mode: string }[];
 }
 export interface ShelfDetail {
   record: ShelfRecord;

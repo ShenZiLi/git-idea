@@ -241,6 +241,7 @@ export async function applyOperationFiles(
   record: WorkspaceOperation,
   directory: string,
   direction: "before" | "after",
+  trash?: (absolutePath: string) => Promise<void>,
 ) {
   const expectedHead = record.commitHash || record.baseHead;
   if ((await headHash(repo)) !== expectedHead)
@@ -274,8 +275,16 @@ export async function applyOperationFiles(
       if (!stateEquals(current, observed.get(file.path)!))
         throw new Error(`应用期间文件发生变化：${file.path}`);
       const desired = await loadState(directory, file[direction]);
-      if (!stateEquals(current, desired))
-        await writeDiskState(repo, file.path, desired);
+      if (!stateEquals(current, desired)) {
+        if (
+          trash &&
+          direction === "after" &&
+          record.kind === "file.trash" &&
+          !desired.exists
+        )
+          await trash(path.join(repo, relativeFile(repo, file.path)));
+        else await writeDiskState(repo, file.path, desired);
+      }
     }
     if ((await headHash(repo)) !== expectedHead)
       throw new Error("应用期间 HEAD 已变化，需检查恢复材料");

@@ -1,4 +1,4 @@
-import { promises as fs, createWriteStream } from "node:fs";
+import { promises as fs, createWriteStream, createReadStream } from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
@@ -12,6 +12,11 @@ export const FILE_LIMIT = 64 * 1024 * 1024,
   TEXT_LIMIT = 2 * 1024 * 1024;
 export const digest = (data: Buffer | string) =>
   createHash("sha256").update(data).digest("hex");
+export async function fileDigest(file: string) {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(file)) hash.update(chunk);
+  return hash.digest("hex");
+}
 export const validId = (id: unknown) => {
   if (
     typeof id !== "string" ||
@@ -147,6 +152,7 @@ export async function assertOrdinary(
   selected: string[],
   allowUntracked = false,
   allowEmpty = false,
+  requireChanges = true,
 ) {
   if ((!selected.length && !allowEmpty) || selected.length > 10000)
     throw new Error("请选择 1 至 10,000 个文件");
@@ -191,7 +197,7 @@ export async function assertOrdinary(
     const item = all.find(
       (change) => change.path === file || change.oldPath === file,
     );
-    if (!item || (!allowUntracked && item.index === "?"))
+    if (requireChanges && (!item || (!allowUntracked && item.index === "?")))
       throw new Error(`文件已无变更或尚未托管：${file}`);
   }
   return all;
