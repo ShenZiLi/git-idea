@@ -368,6 +368,8 @@ export async function recoverScopedCommit(
   if (current !== record.commitHash)
     throw new Error("HEAD 已有后续变化，不能自动恢复索引");
   return withIndexLock(repo, async (lock) => {
+    if ((await headHash(repo)) !== record.commitHash)
+      throw new Error("获取索引锁前 HEAD 已变化，保留恢复材料并拒绝覆盖");
     const real = indexState(await readOptional(await indexFile(repo)));
     if (
       !stateEquals(real, record.beforeIndex) &&
@@ -410,7 +412,10 @@ export async function recoverScopedCommit(
       await saveOperation(root, record);
       await removePrivateIndex(candidate);
     }
-    await lock.publish((await loadState(directory, record.afterIndex)).data!);
+    const candidate = await loadState(directory, record.afterIndex);
+    if ((await headHash(repo)) !== record.commitHash)
+      throw new Error("恢复期间 HEAD 已变化，保留候选索引，不会发布");
+    await lock.publish(candidate.data!);
     record.state = "completed";
     record.message = `提交 ${record.commitHash!.slice(0, 12)} 的索引同步已恢复，不会重复提交。`;
     await saveOperation(root, record);

@@ -9,6 +9,7 @@ import {
   headHash,
   indexFile,
   readOptional,
+  RECORD_LIMIT,
   safeDirectory,
   validId,
   writeDiskState,
@@ -51,6 +52,10 @@ export interface WorkspaceOperation {
   shelfFiles?: string[];
   targetListId?: string;
   copy?: boolean;
+  metadata?: {
+    workspace: { before: StoredState; after: StoredState };
+    shelf?: { before: StoredState; after: StoredState };
+  };
 }
 export async function storeState(
   directory: string,
@@ -98,6 +103,7 @@ export async function loadState(
     !/^100(644|755)$/.test(value.mode) ||
     !Number.isSafeInteger(value.size) ||
     value.size < 0 ||
+    value.size > RECORD_LIMIT ||
     typeof value.sha256 !== "string"
   )
     throw new Error("快照清单损坏");
@@ -146,6 +152,8 @@ export async function newOperation(
   const id = randomUUID(),
     directory = await safeDirectory(root, `operations/${id}`),
     data = await readOptional(await indexFile(repo));
+  if (data && data.length > RECORD_LIMIT)
+    throw new Error("原始索引备份超过 256 MB，操作未开始");
   const record: WorkspaceOperation = {
     schemaVersion: 1,
     id,
@@ -242,6 +250,7 @@ export async function applyOperationFiles(
   directory: string,
   direction: "before" | "after",
   trash?: (absolutePath: string) => Promise<void>,
+  beforeApply?: () => Promise<void>,
 ) {
   const expectedHead = record.commitHash || record.baseHead;
   if ((await headHash(repo)) !== expectedHead)
@@ -268,6 +277,9 @@ export async function applyOperationFiles(
       await loadState(directory, file[direction]);
     }
     const targetIndex = await loadState(directory, desiredIndex);
+    await beforeApply?.();
+    if ((await headHash(repo)) !== expectedHead)
+      throw new Error("开始应用前 HEAD 已变化，文件未修改");
     record.state = "applying";
     await saveOperation(root, record);
     for (const file of record.files) {

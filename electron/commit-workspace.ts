@@ -194,8 +194,10 @@ export async function ensureNoRecovery(repo: string) {
 }
 export async function commitWorkspace(repo: string): Promise<WorkspaceState> {
   return withWorkspace(repo, async (root) => {
+    const pending = await pendingOperations(root);
     const workspace = await readWorkspaceUnlocked(repo, root),
       all = (await changes(repo)).filter((item) => item.index !== "?");
+    if (pending.length) return { ...workspace, pending };
     const assignments: Record<string, string> = Object.create(null);
     for (const item of all)
       assignments[item.path] =

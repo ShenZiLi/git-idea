@@ -413,6 +413,8 @@ export async function gitBytes(
   outputFile?: string,
 ): Promise<Buffer> {
   let streamError: unknown;
+  let ownsOutput = false,
+    completed = false;
   const child = spawn(
     "git",
     [
@@ -453,6 +455,9 @@ export async function gitBytes(
   const output = outputFile
     ? createWriteStream(outputFile, { flags: "wx" })
     : undefined;
+  output?.once("open", () => {
+    ownsOutput = true;
+  });
   const writing = output
     ? pipeline(child.stdout, counter, output).catch((error) => {
         streamError = error;
@@ -482,10 +487,15 @@ export async function gitBytes(
       throw new Error(
         Buffer.concat(errors).toString("utf8").trim() || `Git 退出码 ${code}`,
       );
+    completed = true;
     return output ? Buffer.alloc(0) : Buffer.concat(chunks);
   } finally {
     clearTimeout(timer);
-    if (outputFile && streamError) await fs.rm(outputFile, { force: true });
+    if (!completed) {
+      child.kill();
+      await writing;
+      if (outputFile && ownsOutput) await fs.rm(outputFile, { force: true });
+    }
   }
 }
 export async function entryState(

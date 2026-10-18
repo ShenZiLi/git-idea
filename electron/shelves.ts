@@ -12,10 +12,10 @@ import type {
 import {
   ensureNoRecovery,
   readWorkspaceUnlocked,
-  saveWorkspaceUnlocked,
   pendingOperations,
 } from "./commit-workspace.ts";
 import {
+  atomicWrite,
   assertOrdinary,
   changes,
   digest,
@@ -348,9 +348,18 @@ async function runFiles(
   record: WorkspaceOperation,
   directory: string,
   trash?: (file: string) => Promise<void>,
+  beforeApply?: () => Promise<void>,
 ) {
   try {
-    await applyOperationFiles(repo, root, record, directory, "after", trash);
+    await applyOperationFiles(
+      repo,
+      root,
+      record,
+      directory,
+      "after",
+      trash,
+      beforeApply,
+    );
   } catch (error) {
     record.state = "recovery-required";
     record.message = `操作尚未完整结束，备份已保存。${(error as Error).message}`;
@@ -359,30 +368,136 @@ async function runFiles(
   }
   return null;
 }
-async function finalizeShelfOperation(
+async function prepareShelfMetadata(
   repo: string,
   root: string,
   operation: WorkspaceOperation,
+  operationDirectory: string,
+  expectedWorkspaceRevision: number,
+  expectedShelfRevision: number,
 ) {
-  if (!operation.shelfId) return;
+  if (operation.kind !== "shelf.apply" || !operation.shelfId) return;
   const { record, directory } = await loadShelf(root, repo, operation.shelfId);
-  if (operation.kind === "shelf.apply") {
-    if (!operation.copy) {
-      for (const file of record.files)
-        if (operation.shelfFiles?.includes(file.id)) file.applied = true;
-      if (record.files.every((file) => file.applied)) record.state = "applied";
-      await saveShelf(directory, record);
+  const workspace = await readWorkspaceUnlocked(repo, root);
+  if (
+    record.revision !== expectedShelfRevision ||
+    workspace.revision !== expectedWorkspaceRevision
+  )
+    throw new Error("准备期间列表或搁置记录已变化，请重新确认");
+  if (!workspace.lists.some((list) => list.id === operation.targetListId))
+    throw new Error("恢复目标列表已不存在");
+  const workspaceBefore = await readOptional(path.join(root, "workspace.json"));
+  if (
+    workspaceBefore &&
+    JSON.stringify(JSON.parse(workspaceBefore.toString("utf8"))) !==
+      JSON.stringify(workspace)
+  )
+    throw new Error("读取期间工作台元数据已变化");
+  const shelfBefore = await fs.readFile(path.join(directory, "manifest.json"));
+  if (
+    JSON.stringify(JSON.parse(shelfBefore.toString("utf8"))) !==
+    JSON.stringify(record)
+  )
+    throw new Error("读取期间搁置清单已变化");
+  for (const file of record.files)
+    if (operation.shelfFiles?.includes(file.id)) {
+      workspace.assignments[file.path] = operation.targetListId!;
+      if (!operation.copy) file.applied = true;
     }
-    const workspace = await readWorkspaceUnlocked(repo, root),
-      target = workspace.lists.some(
-        (list) => list.id === operation.targetListId,
-      )
-        ? operation.targetListId!
-        : "default";
-    for (const file of record.files)
-      if (operation.shelfFiles?.includes(file.id))
-        workspace.assignments[file.path] = target;
-    await saveWorkspaceUnlocked(root, workspace);
+  workspace.revision++;
+  operation.metadata = {
+    workspace: {
+      before: await storeState(operationDirectory, indexState(workspaceBefore)),
+      after: await storeState(
+        operationDirectory,
+        indexState(Buffer.from(JSON.stringify(workspace, null, 2))),
+      ),
+    },
+  };
+  if (!operation.copy) {
+    if (record.files.every((file) => file.applied)) record.state = "applied";
+    record.revision++;
+    operation.metadata.shelf = {
+      before: await storeState(operationDirectory, indexState(shelfBefore)),
+      after: await storeState(
+        operationDirectory,
+        indexState(Buffer.from(JSON.stringify(record, null, 2))),
+      ),
+    };
+  }
+}
+
+async function shelfMetadataEntries(
+  root: string,
+  operation: WorkspaceOperation,
+) {
+  if (operation.kind !== "shelf.apply") return [];
+  if (!operation.metadata)
+    throw new Error(
+      "旧搁置恢复记录缺少元数据快照，请保留材料手工恢复，不能自动覆盖归属",
+    );
+  const entries = [
+    {
+      file: path.join(root, "workspace.json"),
+      states: operation.metadata.workspace,
+    },
+  ];
+  if (operation.metadata.shelf) {
+    const directory = await safeDirectory(
+      root,
+      `shelves/${validId(operation.shelfId)}`,
+    );
+    entries.push({
+      file: path.join(directory, "manifest.json"),
+      states: operation.metadata.shelf,
+    });
+  }
+  return entries;
+}
+
+async function verifyShelfMetadata(
+  root: string,
+  operation: WorkspaceOperation,
+  operationDirectory: string,
+) {
+  for (const { file, states } of await shelfMetadataEntries(root, operation)) {
+    const stat = await fs.lstat(file).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return undefined;
+      throw error;
+    });
+    if (stat && (!stat.isFile() || stat.isSymbolicLink()))
+      throw new Error("恢复元数据不能是链接或目录");
+    const current = indexState(await readOptional(file));
+    if (
+      !stateEquals(current, states.before) &&
+      !stateEquals(current, states.after)
+    )
+      throw new Error("列表或搁置元数据已有后续编辑，保留恢复材料并拒绝覆盖");
+    await loadState(operationDirectory, states.before);
+    await loadState(operationDirectory, states.after);
+  }
+}
+
+async function applyShelfMetadata(
+  root: string,
+  operation: WorkspaceOperation,
+  operationDirectory: string,
+  direction: "before" | "after",
+) {
+  await verifyShelfMetadata(root, operation, operationDirectory);
+  for (const { file, states } of await shelfMetadataEntries(root, operation)) {
+    const desired = await loadState(operationDirectory, states[direction]);
+    const current = indexState(await readOptional(file));
+    if (
+      !stateEquals(current, states.before) &&
+      !stateEquals(current, states.after)
+    )
+      throw new Error("应用期间元数据发生变化，停止恢复并保留双方材料");
+    if (stateEquals(current, desired)) continue;
+    if (current.exists && file === path.join(root, "workspace.json"))
+      await atomicWrite(`${file}.bak`, current.data!);
+    if (desired.exists) await atomicWrite(file, desired.data!);
+    else await fs.unlink(file);
   }
 }
 export async function createShelf(
@@ -527,6 +642,8 @@ export async function createShelf(
       root,
       operation.record,
       operation.directory,
+      undefined,
+      () => verifyPreview(repo, p, paths),
     );
     if (failure) return failure;
     operation.record.state = "completed";
@@ -596,10 +713,21 @@ export async function applyShelf(
       base = new Map<string, FileState>(),
       working = new Map<string, FileState>(),
       staged = new Map<string, FileState>();
-    let direct = true;
+    let direct = true,
+      materialBytes = operation.record.beforeIndex.size;
     for (const file of paths) {
       const current = await diskState(repo, file),
         original = record.pathStates[file];
+      for (const state of [original.base, original.working, original.index])
+        if (!Number.isSafeInteger(state?.size) || state.size < 0)
+          throw new Error("搁置快照大小无效");
+      materialBytes +=
+        current.size +
+        original.base.size +
+        original.working.size +
+        original.index.size;
+      if (materialBytes > RECORD_LIMIT)
+        throw new Error("所选恢复内容及目标文件备份超过 256 MB，文件未修改");
       base.set(file, await loadState(directory, original.base));
       working.set(file, await loadState(directory, original.working));
       staged.set(file, await loadState(directory, original.index));
@@ -636,6 +764,9 @@ export async function applyShelf(
         working,
         "selected-working",
       );
+      materialBytes += (await fs.stat(patch)).size;
+      if (materialBytes > RECORD_LIMIT)
+        throw new Error("恢复材料及补丁超过 256 MB，文件未修改");
       if ((await fs.stat(patch)).size)
         await git(
           repo,
@@ -660,6 +791,9 @@ export async function applyShelf(
         staged,
         "selected-staged",
       );
+      materialBytes += (await fs.stat(patch)).size;
+      if (materialBytes > RECORD_LIMIT)
+        throw new Error("恢复材料及补丁超过 256 MB，文件未修改");
       if ((await fs.stat(patch)).size)
         await git(
           repo,
@@ -675,19 +809,43 @@ export async function applyShelf(
         entry,
       ]),
     );
-    for (const file of paths)
+    let recoveryBytes = operation.record.beforeIndex.size;
+    for (const file of paths) {
+      const before = beforeStates.get(file)!,
+        after = await entryState(repo, finalMap.get(file));
+      recoveryBytes += before.size + after.size;
+      if (recoveryBytes > RECORD_LIMIT)
+        throw new Error("恢复操作备份超过 256 MB，文件未修改");
       operation.record.files.push({
         path: file,
-        before: await storeState(operation.directory, beforeStates.get(file)!),
-        after: await storeState(
-          operation.directory,
-          await entryState(repo, finalMap.get(file)),
-        ),
+        before: await storeState(operation.directory, before),
+        after: await storeState(operation.directory, after),
       });
+    }
+    const candidateState = indexState(await readOptional(realIndex));
+    if (recoveryBytes + candidateState.size > RECORD_LIMIT)
+      throw new Error("恢复操作及索引备份超过 256 MB，文件未修改");
     operation.record.afterIndex = await storeState(
       operation.directory,
-      indexState(await readOptional(realIndex)),
+      candidateState,
     );
+    await prepareShelfMetadata(
+      repo,
+      root,
+      operation.record,
+      operation.directory,
+      workspace.revision,
+      record.revision,
+    );
+    const metadata = operation.record.metadata!;
+    const metadataBytes =
+      metadata.workspace.before.size +
+      metadata.workspace.after.size +
+      (metadata.shelf
+        ? metadata.shelf.before.size + metadata.shelf.after.size
+        : 0);
+    if (recoveryBytes + candidateState.size + metadataBytes > RECORD_LIMIT)
+      throw new Error("恢复操作及元数据备份超过 256 MB，文件未修改");
     await verifyCaptured(
       repo,
       operation.record.baseHead,
@@ -700,10 +858,20 @@ export async function applyShelf(
       root,
       operation.record,
       operation.directory,
+      undefined,
+      async () => {
+        await verifyPreview(repo, p, paths);
+        await verifyShelfMetadata(root, operation.record, operation.directory);
+      },
     );
     if (failure) return failure;
     try {
-      await finalizeShelfOperation(repo, root, operation.record);
+      await applyShelfMetadata(
+        root,
+        operation.record,
+        operation.directory,
+        "after",
+      );
       operation.record.state = "completed";
       operation.record.message =
         p.copy === true
@@ -785,6 +953,7 @@ export async function archiveFileAction(
       operation.record,
       operation.directory,
       trash,
+      () => verifyPreview(repo, p, paths),
     );
     if (failure) return failure;
     operation.record.state = "completed";
@@ -819,9 +988,17 @@ export async function mutateShelf(
         return recoverScopedCommit(repo, root, record.id);
       }
       const direction = p.direction === "before" ? "before" : "after";
-      await applyOperationFiles(repo, root, record, directory, direction);
-      if (direction === "after")
-        await finalizeShelfOperation(repo, root, record);
+      await verifyShelfMetadata(root, record, directory);
+      await applyOperationFiles(
+        repo,
+        root,
+        record,
+        directory,
+        direction,
+        undefined,
+        () => verifyShelfMetadata(root, record, directory),
+      );
+      await applyShelfMetadata(root, record, directory, direction);
       record.state = direction === "after" ? "completed" : "rolled-back";
       record.message =
         direction === "after" ? "已完成中断操作" : "已从备份恢复操作前内容";
@@ -956,4 +1133,51 @@ export async function archivedFileBytes(
     return { name: path.basename(file.path), data: state.data! };
   }
   throw new Error("无效的归档来源");
+}
+
+export async function prepareShelfPatch(
+  repo: string,
+  p: Record<string, unknown>,
+) {
+  return withWorkspace(repo, async (root) => {
+    const { record, directory: archive } = await loadShelf(root, repo, p.id);
+    if (
+      !Array.isArray(p.fileIds) ||
+      !p.fileIds.length ||
+      p.fileIds.some(
+        (id) =>
+          typeof id !== "string" || !record.files.some((f) => f.id === id),
+      )
+    )
+      throw new Error("请选择搁置文件");
+    const selected = record.files.filter((file) =>
+      (p.fileIds as string[]).includes(file.id),
+    );
+    const base = new Map<string, FileState>(),
+      target = new Map<string, FileState>();
+    let bytes = 0;
+    for (const file of selected)
+      for (const name of new Set([
+        file.path,
+        ...(file.oldPath ? [file.oldPath] : []),
+      ])) {
+        const saved = record.pathStates[name];
+        const before = await loadState(archive, saved.base),
+          after = await loadState(
+            archive,
+            p.staged === true ? saved.index : saved.working,
+          );
+        bytes += before.size + after.size;
+        if (bytes > RECORD_LIMIT) throw new Error("所选补丁材料超过 256 MB");
+        base.set(name, before);
+        target.set(name, after);
+      }
+    const output = await safeDirectory(root, `exports/${randomUUID()}`),
+      file = await patchFromStates(repo, output, base, target, "shelf");
+    return {
+      file,
+      size: (await fs.stat(file)).size,
+      name: "shelf-changes.patch",
+    };
+  });
 }
