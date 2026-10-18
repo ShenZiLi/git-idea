@@ -46,6 +46,7 @@ import {
 import { commitScope, commitScopePreview } from "./commit-index.ts";
 import { patchPreview, readonlyDiff } from "./patches.ts";
 import { stashFiles, stashDiff } from "./stashes.ts";
+import { workspaceLockInfo, workspaceUnlock } from "./workspace-io.ts";
 
 export function createApi(
   options: {
@@ -149,6 +150,10 @@ export function createApi(
     }
     const repo = await repository(request.repo || "");
     switch (request.method) {
+      case "workspaceLockInfo":
+        return workspaceLockInfo(repo);
+      case "workspaceUnlock":
+        return workspaceUnlock(repo, p);
       case "stashFiles":
         return stashFiles(repo, p);
       case "stashDiff":

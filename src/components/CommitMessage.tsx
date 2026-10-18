@@ -75,7 +75,11 @@ export function CommitMessage({
     preparingRef = useRef(false),
     pendingDraft = useRef<{ repo: string; key: string; text: string } | null>(
       null,
-    );
+    ),
+    failedDrafts = useRef(
+      new Map<string, { repo: string; key: string; text: string }>(),
+    ),
+    failureKey = useRef<string | null>(null);
   if (root.current !== s?.root) {
     root.current = s?.root;
     generation.current++;
@@ -111,6 +115,8 @@ export function CommitMessage({
               id: draftKey,
               message: text,
             });
+            failedDrafts.current.delete(draftId(repo, draftKey));
+            failureKey.current = null;
             if (root.current === repo) void refreshWorkspace();
             return;
           } catch (e) {
@@ -119,10 +125,17 @@ export function CommitMessage({
         }
       });
     void queue.current.catch((e) => {
+      failureKey.current = draftId(repo, draftKey);
+      if (drafts.current[draftId(repo, draftKey)] === text)
+        failedDrafts.current.set(draftId(repo, draftKey), {
+          repo,
+          key: draftKey,
+          text,
+        });
       if (root.current === repo) setError(e.message);
     });
   }
-  function flushDraft() {
+  function flushDraft(retry = false) {
     if (timer.current) {
       clearTimeout(timer.current);
       timer.current = null;
@@ -131,10 +144,24 @@ export function CommitMessage({
       const pending = pendingDraft.current;
       pendingDraft.current = null;
       persist(pending.repo, pending.key, pending.text);
+    } else if (retry && s) {
+      const failed = failedDrafts.current.get(draftId(s.root, key));
+      if (failed) {
+        failedDrafts.current.delete(draftId(s.root, key));
+        persist(
+          failed.repo,
+          failed.key,
+          drafts.current[draftId(s.root, key)] ?? failed.text,
+        );
+      }
     }
-    return queue.current;
+    return retry && s
+      ? queue.current.catch((error) => {
+          if (failureKey.current === draftId(s.root, key)) throw error;
+        })
+      : queue.current;
   }
-  if (draftFlushRef) draftFlushRef.current = flushDraft;
+  if (draftFlushRef) draftFlushRef.current = () => flushDraft(true);
   function edit(text: string) {
     if (!s) return;
     if (
@@ -222,7 +249,7 @@ export function CommitMessage({
     try {
       if (!(await prepare())) throw new Error("请先处理编辑器的自动保存提示");
       if (root.current !== repo || session !== generation.current) return;
-      await flushDraft();
+      await flushDraft(true);
       if (root.current !== repo || session !== generation.current) return;
       const value = await request<
         Pick<Preview, "revision" | "head" | "index" | "paths" | "partial">
@@ -455,6 +482,17 @@ export function CommitMessage({
       {error && (
         <div className="form-error" role="alert">
           {error}
+          {s && failedDrafts.current.has(draftId(s.root, key)) && (
+            <button
+              onClick={() =>
+                void flushDraft(true)
+                  .then(() => setError(""))
+                  .catch(() => {})
+              }
+            >
+              重试保存草稿
+            </button>
+          )}
         </div>
       )}
       {s && (!s.identity.name || !s.identity.email) && (

@@ -88,6 +88,308 @@ export async function safeDirectory(root: string, relative: string) {
   await fs.mkdir(destination, { recursive: true });
   return destination;
 }
+
+export interface LockIdentity {
+  dev: string;
+  ino: string;
+  birthtimeNs: string;
+}
+export const lockIdentity = (stat: {
+  dev: bigint;
+  ino: bigint;
+  birthtimeNs: bigint;
+}): LockIdentity => ({
+  dev: String(stat.dev),
+  ino: String(stat.ino),
+  birthtimeNs: String(stat.birthtimeNs),
+});
+const sameLock = (a: LockIdentity, b: LockIdentity) =>
+  a.dev === b.dev && a.ino === b.ino && a.birthtimeNs === b.birthtimeNs;
+export async function matchesLock(file: string, identity: LockIdentity) {
+  try {
+    const stat = await fs.lstat(file, { bigint: true });
+    return (
+      stat.isFile() &&
+      !stat.isSymbolicLink() &&
+      sameLock(lockIdentity(stat), identity)
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
+async function smallLock(file: string) {
+  let stat;
+  try {
+    stat = await fs.lstat(file, { bigint: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 16384n)
+    throw new Error("锁文件不是受支持的普通小文件");
+  const identity = lockIdentity(stat),
+    handle = await fs.open(file, "r");
+  try {
+    const before = await handle.stat({ bigint: true });
+    if (!sameLock(identity, lockIdentity(before)) || before.size > 16384n)
+      throw new Error("读取期间锁已被替换");
+    const bytes = Buffer.alloc(16385),
+      read = await handle.read(bytes, 0, bytes.length, 0);
+    const after = await handle.stat({ bigint: true }),
+      data = bytes.subarray(0, read.bytesRead),
+      token = data.toString("utf8");
+    if (
+      read.bytesRead > 16384 ||
+      BigInt(read.bytesRead) !== after.size ||
+      before.size !== after.size ||
+      before.mtimeNs !== after.mtimeNs ||
+      !Buffer.from(token).equals(data) ||
+      !(await matchesLock(file, identity))
+    )
+      throw new Error("读取期间锁内容发生变化");
+    return { token, identity };
+  } finally {
+    await handle.close();
+  }
+}
+function workspaceOwner(token: string) {
+  const owner = JSON.parse(token);
+  if (
+    !owner ||
+    !Number.isSafeInteger(owner.pid) ||
+    owner.pid <= 0 ||
+    owner.pid > 2147483647 ||
+    typeof owner.createdAt !== "string" ||
+    !Number.isFinite(Date.parse(owner.createdAt)) ||
+    new Date(owner.createdAt).toISOString() !== owner.createdAt
+  )
+    throw new Error("工作台锁的进程或日期信息无效");
+  validId(owner.id);
+  return owner as { pid: number; id: string; createdAt: string };
+}
+function deadProcess(pid: number) {
+  try {
+    process.kill(pid, 0);
+    return { dead: false, reason: "锁所属进程仍在运行" };
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ESRCH"
+      ? { dead: true, reason: "锁所属进程已退出，可明确确认后释放" }
+      : { dead: false, reason: "无法确认锁所属进程已退出，不能释放" };
+  }
+}
+export async function createIndexLockOwner(
+  repo: string,
+  identity: LockIdentity,
+) {
+  const root = await workspaceRoot(repo),
+    workspace = await smallLock(path.join(root, "workspace.lock"));
+  if (!workspace) throw new Error("创建索引锁必须持有工作台锁");
+  const owner = workspaceOwner(workspace.token);
+  if (owner.pid !== process.pid) throw new Error("工作台锁不属于当前进程");
+  const token = JSON.stringify({
+    schemaVersion: 1,
+    pid: owner.pid,
+    workspaceId: owner.id,
+    workspaceToken: workspace.token,
+    index: identity,
+  });
+  const file = path.join(root, "index-lock-owner.json"),
+    handle = await fs.open(file, "wx");
+  const markerIdentity = lockIdentity(await handle.stat({ bigint: true }));
+  try {
+    await handle.writeFile(token);
+    await handle.sync();
+  } catch (error) {
+    await handle.close();
+    if (await matchesLock(file, markerIdentity)) await fs.unlink(file);
+    throw error;
+  }
+  await handle.close();
+  return token;
+}
+export async function removeIndexLockOwner(repo: string, token: string) {
+  const file = path.join(await workspaceRoot(repo), "index-lock-owner.json"),
+    marker = await smallLock(file);
+  if (!marker) return;
+  if (marker.token !== token)
+    throw new Error("索引锁所有权标记已改变，不会删除");
+  if (!(await matchesLock(file, marker.identity)))
+    throw new Error("索引锁所有权标记已被替换");
+  await fs.unlink(file);
+}
+async function inspectWorkspaceLocks(repo: string) {
+  const root = await workspaceRoot(repo),
+    workspace = await smallLock(path.join(root, "workspace.lock"));
+  const lockFile = `${await indexFile(repo)}.lock`;
+  let indexStat;
+  try {
+    indexStat = await fs.lstat(lockFile, { bigint: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  const marker = await smallLock(path.join(root, "index-lock-owner.json"));
+  const owner = workspace ? workspaceOwner(workspace.token) : undefined;
+  let indexOwned = false;
+  if (marker && workspace && owner) {
+    const saved = JSON.parse(marker.token),
+      identity = saved?.index;
+    if (
+      saved.schemaVersion !== 1 ||
+      saved.pid !== owner.pid ||
+      saved.workspaceId !== owner.id ||
+      saved.workspaceToken !== workspace.token ||
+      !identity ||
+      ![identity.dev, identity.ino, identity.birthtimeNs].every(
+        (value) => typeof value === "string" && /^\d+$/.test(value),
+      )
+    )
+      throw new Error("索引锁所有权标记与工作台锁不匹配，不能释放");
+    indexOwned =
+      !indexStat ||
+      (indexStat.isFile() &&
+        !indexStat.isSymbolicLink() &&
+        sameLock(lockIdentity(indexStat), identity));
+  }
+  const processState = owner
+    ? deadProcess(owner.pid)
+    : { dead: false, reason: "没有可验证的工作台锁" };
+  return {
+    root,
+    workspace,
+    owner,
+    lockFile,
+    indexStat,
+    marker,
+    indexOwned,
+    processState,
+  };
+}
+export async function workspaceLockInfo(repo: string) {
+  try {
+    const info = await inspectWorkspaceLocks(repo);
+    const indexUnknown = !!info.indexStat && !info.indexOwned;
+    return {
+      exists: !!info.workspace,
+      token: info.workspace?.token,
+      pid: info.owner?.pid,
+      createdAt: info.owner?.createdAt,
+      dead: info.processState.dead,
+      canRelease: !!info.workspace && info.processState.dead && !indexUnknown,
+      reason: indexUnknown
+        ? "索引锁没有匹配的所有权证明，不会释放未知索引锁"
+        : info.processState.reason,
+      indexLock: {
+        exists: !!info.indexStat,
+        owned: !!info.indexStat && info.indexOwned,
+        reason: indexUnknown
+          ? "索引锁来源未知或已被替换"
+          : info.indexStat
+            ? "索引锁与工作台锁所有权匹配"
+            : "没有索引锁",
+      },
+    };
+  } catch (error) {
+    return {
+      exists: true,
+      canRelease: false,
+      dead: false,
+      reason: (error as Error).message,
+      indexLock: {
+        exists: true,
+        owned: false,
+        reason: "锁信息无法验证，拒绝自动处理",
+      },
+    };
+  }
+}
+export async function workspaceUnlock(
+  repo: string,
+  params: Record<string, unknown>,
+) {
+  if (
+    params.confirm !== true ||
+    typeof params.expectedToken !== "string" ||
+    Buffer.byteLength(params.expectedToken, "utf8") > 16384
+  )
+    throw new Error("释放中断锁需要明确确认及原始锁标识");
+  return serialize(repo, async () => {
+    const initial = await inspectWorkspaceLocks(repo);
+    const verify = async () => {
+      const fresh = await inspectWorkspaceLocks(repo);
+      if (
+        !initial.workspace ||
+        !fresh.workspace ||
+        fresh.workspace.token !== params.expectedToken ||
+        initial.workspace.token !== fresh.workspace.token ||
+        !sameLock(initial.workspace.identity, fresh.workspace.identity) ||
+        !fresh.processState.dead
+      )
+        throw new Error(
+          "锁已变化、进程仍在运行或无法确认已退出；未释放工作台锁",
+        );
+      if (fresh.indexStat && !fresh.indexOwned)
+        throw new Error("索引锁不属于该中断操作，拒绝释放");
+      if (
+        fresh.marker?.token !== initial.marker?.token ||
+        !!fresh.indexStat !== !!initial.indexStat ||
+        (fresh.indexStat &&
+          initial.indexStat &&
+          !sameLock(
+            lockIdentity(fresh.indexStat),
+            lockIdentity(initial.indexStat),
+          ))
+      )
+        throw new Error("索引锁或所有权证明已变化，停止释放");
+      return fresh;
+    };
+    let fresh = await verify();
+    if (fresh.indexStat) {
+      fresh = await verify();
+      await fs.unlink(fresh.lockFile);
+    }
+    // Once the index lock has been removed, check the remaining owner proof
+    // independently; never remove an index lock newly created by another process.
+    if (fresh.marker) {
+      const workspace = await smallLock(
+        path.join(fresh.root, "workspace.lock"),
+      );
+      if (
+        !workspace ||
+        workspace.token !== params.expectedToken ||
+        !sameLock(workspace.identity, initial.workspace!.identity) ||
+        !deadProcess(workspaceOwner(workspace.token).pid).dead
+      )
+        throw new Error("工作台锁已变化，所有权标记保留");
+      const marker = await smallLock(
+        path.join(fresh.root, "index-lock-owner.json"),
+      );
+      if (
+        !marker ||
+        marker.token !== fresh.marker.token ||
+        !sameLock(marker.identity, fresh.marker.identity)
+      )
+        throw new Error("索引所有权标记已变化");
+      await fs.unlink(path.join(fresh.root, "index-lock-owner.json"));
+    }
+    const workspace = await smallLock(path.join(fresh.root, "workspace.lock"));
+    if (
+      !workspace ||
+      workspace.token !== params.expectedToken ||
+      !sameLock(workspace.identity, initial.workspace!.identity) ||
+      !deadProcess(workspaceOwner(workspace.token).pid).dead
+    )
+      throw new Error("工作台锁已变化，未释放");
+    try {
+      await fs.lstat(fresh.lockFile);
+      throw new Error("索引锁已重新出现，工作台锁保留");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    await fs.unlink(path.join(fresh.root, "workspace.lock"));
+    return "已释放已确认退出进程的锁；请继续检查并恢复中断操作";
+  });
+}
 export async function withWorkspace<T>(
   repo: string,
   action: (root: string) => Promise<T>,

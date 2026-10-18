@@ -14,6 +14,11 @@ import {
   validId,
   writeDiskState,
   writeJson,
+  createIndexLockOwner,
+  lockIdentity,
+  matchesLock,
+  removeIndexLockOwner,
+  type LockIdentity,
   type FileState,
 } from "./workspace-io.ts";
 
@@ -212,29 +217,38 @@ export async function withIndexLock<T>(
     lockFile = `${file}.lock`;
   let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
   let owned = false;
+  let identity: LockIdentity | undefined, ownerToken: string | undefined;
   try {
     try {
       handle = await fs.open(lockFile, "wx");
       owned = true;
+      identity = lockIdentity(await handle.stat({ bigint: true }));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "EEXIST")
         throw new Error("Git 索引已被其他程序锁定，请稍后重试");
       throw error;
     }
+    ownerToken = await createIndexLockOwner(repo, identity!);
     return await action({
       publish: async (data) => {
         if (!handle) throw new Error("索引锁已发布");
+        if (!identity || !(await matchesLock(lockFile, identity)))
+          throw new Error("索引锁已被替换，拒绝发布");
         if (data) {
           await handle.writeFile(data);
           await handle.sync();
           await handle.close();
           handle = undefined;
+          if (!(await matchesLock(lockFile, identity)))
+            throw new Error("索引锁已被替换，拒绝发布");
           await fs.rename(lockFile, file);
           owned = false;
         } else {
           await fs.rm(file, { force: true });
           await handle.close();
           handle = undefined;
+          if (!(await matchesLock(lockFile, identity)))
+            throw new Error("索引锁已被替换，拒绝删除");
           await fs.unlink(lockFile);
           owned = false;
         }
@@ -242,7 +256,9 @@ export async function withIndexLock<T>(
     });
   } finally {
     await handle?.close();
-    if (owned) await fs.unlink(lockFile);
+    if (owned && identity && (await matchesLock(lockFile, identity)))
+      await fs.unlink(lockFile);
+    if (ownerToken) await removeIndexLockOwner(repo, ownerToken);
   }
 }
 export async function applyOperationFiles(
