@@ -22,6 +22,14 @@ import { normalizeUiScale } from "../shared/types.ts";
 import { BRANCH_ACTIONS } from "../shared/branches.ts";
 import { branchInfo, mutateBranch } from "./branches.ts";
 import { branchCompare, branchCompareFile } from "./branch-compare.ts";
+import {
+  commitWorkspace,
+  ensureNoRecovery,
+  ignoredFiles,
+  modules,
+  mutateWorkspace,
+} from "./commit-workspace.ts";
+import { WORKSPACE_ACTIONS } from "../shared/commit-workspace.ts";
 
 export function createApi(
   options: { preferencesPath?: string; defaultRepo?: string } = {},
@@ -125,6 +133,12 @@ export function createApi(
         return snapshot(repo, p);
       case "branchInfo":
         return branchInfo(repo, p);
+      case "commitWorkspace":
+        return commitWorkspace(repo);
+      case "ignoredFiles":
+        return ignoredFiles(repo, p);
+      case "modules":
+        return modules(repo);
       case "branchCompare":
         return branchCompare(repo, p);
       case "branchCompareFile":
@@ -154,10 +168,20 @@ export function createApi(
         return commitDetail(repo, String(p.hash || ""));
       case "mutate":
         if (
+          (WORKSPACE_ACTIONS as readonly string[]).includes(
+            String(p.action || ""),
+          )
+        )
+          return mutateWorkspace(repo, String(p.action), p);
+        if (
           (BRANCH_ACTIONS as readonly string[]).includes(String(p.action || ""))
         )
-          return mutateBranch(repo, String(p.action), p);
-        return mutate(repo, String(p.action || ""), p);
+          return mutateBranch(repo, String(p.action), p, () =>
+            ensureNoRecovery(repo),
+          );
+        return mutate(repo, String(p.action || ""), p, () =>
+          ensureNoRecovery(repo),
+        );
       default:
         throw new Error("未知请求");
     }

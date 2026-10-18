@@ -438,10 +438,12 @@ export async function mutateBranch(
   repo: string,
   action: string,
   p: Params,
+  preflight?: () => Promise<void>,
 ): Promise<string> {
   if (!(BRANCH_ACTIONS as readonly string[]).includes(action))
     throw new Error("未知分支操作");
   return serialize(repo, async () => {
+    await preflight?.();
     const info = await assertContext(repo, p);
     await assertIdle(repo);
     if (!info.remote) await branchName(repo, info.name);

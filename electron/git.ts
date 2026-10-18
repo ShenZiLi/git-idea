@@ -31,7 +31,7 @@ function redact(value: string) {
 export async function git(
   cwd: string,
   args: string[],
-  input?: string,
+  input?: string | Buffer,
   acceptedExitCodes: readonly number[] = [0],
   extraEnv: Record<string, string> = {},
 ): Promise<string> {
@@ -971,7 +971,7 @@ async function branchName(repo: string, value: string) {
 
 // Build a private index first; publish it only if the real index is unchanged.
 // The worktree is never rewritten when excluding formatting-only changes.
-async function prepareCommitIndex(repo: string, stagePaths?: string[]) {
+export async function prepareCommitIndex(repo: string, stagePaths?: string[]) {
   const indexPath = path.resolve(
     repo,
     (await git(repo, ["rev-parse", "--git-path", "index"])).trim(),
@@ -1106,8 +1106,10 @@ export async function mutate(
   repo: string,
   action: string,
   params: Record<string, unknown>,
+  preflight?: () => Promise<void>,
 ): Promise<string> {
   return serialize(repo, async () => {
+    await preflight?.();
     const paths = Array.isArray(params.paths)
       ? params.paths.map((p) => relativeFile(repo, String(p)))
       : [];
