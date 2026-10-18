@@ -432,7 +432,7 @@ function CompareSession({
     </div>
   );
 }
-function ReadonlyDiff({ data }: { data: DiffData }) {
+export function ReadonlyDiff({ data }: { data: DiffData }) {
   const tooManyLines =
     data.before.split("\n").length + data.after.split("\n").length > 20000;
   const rows = useMemo(

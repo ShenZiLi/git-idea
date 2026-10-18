@@ -127,6 +127,10 @@ export interface Bootstrap {
 export interface GitBridge {
   request<T>(request: ApiRequest): Promise<T>;
   chooseDirectory(): Promise<string | null>;
+  savePatch?(repo: string, params: Record<string, unknown>): Promise<string | null>;
+  copyPatch?(repo: string, params: Record<string, unknown>): Promise<number>;
+  saveArchiveFile?(repo: string, params: Record<string, unknown>): Promise<string | null>;
+  openDiffWindow?(repo: string, source: Record<string, unknown>): Promise<void>;
   window(action: "minimize" | "maximize" | "close"): void;
 }
 declare global {

@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import { ReadonlyDiffWindow } from "./components/ReadonlyDiffWindow";
 import "./styles.css";
 
 class ErrorBoundary extends React.Component<
@@ -25,6 +26,6 @@ class ErrorBoundary extends React.Component<
 }
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <ErrorBoundary>
-    <App />
+    {new URLSearchParams(location.search).get("diffWindow") ? <ReadonlyDiffWindow id={new URLSearchParams(location.search).get("diffWindow")!}/> : <App />}
   </ErrorBoundary>,
 );

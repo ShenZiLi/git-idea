@@ -3663,3 +3663,5 @@ button.primary {
     forced-color-adjust: none;
   }
 }
+
+.readonly-window{height:100vh;display:flex;flex-direction:column;background:var(--bg)}.readonly-window .titlebar{padding:0 16px;gap:16px}.readonly-content{flex:1;overflow:auto;min-height:0}.readonly-match{background:rgba(220,166,71,.25)!important}.readonly-window .compare-code{overflow:visible}

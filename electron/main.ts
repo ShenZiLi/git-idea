@@ -7,13 +7,19 @@ import {
   protocol,
   net,
   session,
+  clipboard,
+  shell,
 } from "electron";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { createApi } from "./api";
 import { normalizeUiScale } from "../shared/types";
 import type { Bootstrap, Preferences } from "../shared/types";
+import { repository } from "./git";
+import { archivedFileBytes } from "./shelves";
+import { CLIPBOARD_LIMIT, preparePatch, readonlyDiff } from "./patches";
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -44,7 +50,9 @@ app.whenReady().then(async () => {
       process.env.GIT_IDEA_PREFERENCES ||
       path.join(app.getPath("userData"), "preferences.json"),
     defaultRepo: process.env.GIT_IDEA_REPO,
+    trashItem: absolute => shell.trashItem(absolute),
   });
+  const readers = new Map<number, { id: string; data: unknown; preferences: Preferences; window: BrowserWindow }>();
   const trusted = (
     event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent,
   ) => {
@@ -58,6 +66,11 @@ app.whenReady().then(async () => {
       throw new Error("请求来源无效");
   };
   ipcMain.handle("git:request", async (event, request) => {
+    const reader = readers.get(event.sender.id);
+    if (reader) {
+      if (event.senderFrame !== event.sender.mainFrame || request?.method !== "readonlyBootstrap" || request.params?.id !== reader.id) throw new Error("此窗口仅支持读取已打开的差异");
+      return { data: reader.data, preferences: reader.preferences };
+    }
     trusted(event);
     const result = await api(request);
     if (request.method === "preferences") {
@@ -70,6 +83,41 @@ app.whenReady().then(async () => {
     }
     return result;
   });
+  ipcMain.handle("git:save-patch", async (event, payload) => {
+    trusted(event);
+    const repo = await repository(payload.repo), patch = await preparePatch(repo, payload.params || {});
+    const result = await dialog.showSaveDialog(window!, { title: "导出补丁", defaultPath: patch.name, filters: [{ name: "Git 补丁", extensions: ["patch"] }] });
+    if (result.canceled || !result.filePath) return null;
+    await fs.copyFile(patch.file, result.filePath);
+    return result.filePath;
+  });
+  ipcMain.handle("git:copy-patch", async (event, payload) => {
+    trusted(event);
+    const patch = await preparePatch(await repository(payload.repo), payload.params || {});
+    if (patch.size > CLIPBOARD_LIMIT) throw new Error("补丁超过 8 MB，请导出到文件");
+    clipboard.writeText(await fs.readFile(patch.file, "utf8"));
+    return patch.size;
+  });
+  ipcMain.handle("git:save-archive", async (event, payload) => {
+    trusted(event);
+    const file = await archivedFileBytes(await repository(payload.repo), payload.params || {});
+    const result = await dialog.showSaveDialog(window!, { title: "另存归档文件", defaultPath: file.name });
+    if (result.canceled || !result.filePath) return null;
+    await fs.writeFile(result.filePath, file.data);
+    return result.filePath;
+  });
+  ipcMain.handle("git:diff-window", async (event, payload) => {
+    trusted(event);
+    const data = await readonlyDiff(await repository(payload.repo), payload.source || {});
+    const { preferences } = await api({ method: "bootstrap" }) as Bootstrap;
+    const id = randomUUID(), reader = new BrowserWindow({ width: 1200, height: 800, minWidth: 650, minHeight: 400, frame: false, title: "只读差异", backgroundColor: windowBackground(preferences.theme), webPreferences: { zoomFactor: normalizeUiScale(preferences.uiScale) / 100, preload: path.join(__dirname, "preload.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true } });
+    readers.set(reader.webContents.id, { id, data, preferences, window: reader });
+    const contentsId = reader.webContents.id;
+    reader.on("closed", () => readers.delete(contentsId));
+    reader.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    reader.webContents.on("will-navigate", event => event.preventDefault());
+    await reader.loadURL(`${devURL || appURL + "/"}${(devURL || "").includes("?") ? "&" : "?"}diffWindow=${id}`);
+  });
   ipcMain.handle("git:choose-directory", async (event) => {
     trusted(event);
     const result = await dialog.showOpenDialog(window!, {
@@ -79,6 +127,8 @@ app.whenReady().then(async () => {
     return result.canceled ? null : result.filePaths[0];
   });
   ipcMain.on("window:action", (event, action) => {
+    const reader = readers.get(event.sender.id);
+    if (reader) { if (event.senderFrame === event.sender.mainFrame && action === "close") reader.window.close(); return; }
     trusted(event);
     if (action === "close") window?.close();
     else if (action === "minimize") window?.minimize();
