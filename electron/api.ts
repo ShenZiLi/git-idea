@@ -43,13 +43,7 @@ import {
   workspacePreview,
   archiveFileAction,
 } from "./shelves.ts";
-import {
-  commitScope,
-  commitScopePreview,
-  recoverScopedCommit,
-} from "./commit-index.ts";
-import { pendingOperations } from "./commit-workspace.ts";
-import { withWorkspace, workspaceRoot, validId } from "./workspace-io.ts";
+import { commitScope, commitScopePreview } from "./commit-index.ts";
 import { patchPreview, readonlyDiff } from "./patches.ts";
 import { stashFiles, stashDiff } from "./stashes.ts";
 

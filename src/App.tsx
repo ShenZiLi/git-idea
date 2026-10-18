@@ -1298,6 +1298,7 @@ export default function App() {
                     <ConsolePanel logs={logs} />
                   ) : (
                     <StashPanel
+                      key={repo}
                       repo={repo}
                       stashes={snapshot?.stashes || []}
                       {...{ busy, mutate, confirm }}

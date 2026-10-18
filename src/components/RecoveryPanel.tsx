@@ -10,7 +10,7 @@ import {
 import type { OperationSummary } from "../../shared/commit-workspace";
 import { request } from "../api";
 import type { ShelfPanelProps } from "./ShelfPanel";
-import { dateTime, IconButton, Spinner } from "./ui";
+import { dateTime, Empty, IconButton, Spinner } from "./ui";
 import "../shelf.css";
 
 export type RecoveryPanelProps = Pick<
@@ -181,6 +181,11 @@ function RecoverySession({
         </div>
       )}
       <div className="recovery-records">
+        {!loading && !error && !pending.length && !showHistory && (
+          <Empty title="没有待恢复操作">
+            已完成的回收和回滚备份可在下方展开。
+          </Empty>
+        )}
         {visible.map((record) => {
           const open = expanded.includes(record.id),
             corrupted = record.kind === "corrupted",
