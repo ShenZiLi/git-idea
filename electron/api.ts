@@ -19,6 +19,9 @@ import {
 } from "./git.ts";
 import type { ApiRequest, Preferences } from "../shared/types.ts";
 import { normalizeUiScale } from "../shared/types.ts";
+import { BRANCH_ACTIONS } from "../shared/branches.ts";
+import { branchInfo, mutateBranch } from "./branches.ts";
+import { branchCompare, branchCompareFile } from "./branch-compare.ts";
 
 export function createApi(
   options: { preferencesPath?: string; defaultRepo?: string } = {},
@@ -120,6 +123,12 @@ export function createApi(
     switch (request.method) {
       case "snapshot":
         return snapshot(repo, p);
+      case "branchInfo":
+        return branchInfo(repo, p);
+      case "branchCompare":
+        return branchCompare(repo, p);
+      case "branchCompareFile":
+        return branchCompareFile(repo, p);
       case "history":
         return history(repo, p);
       case "logPeople":
@@ -144,6 +153,10 @@ export function createApi(
       case "commitDetail":
         return commitDetail(repo, String(p.hash || ""));
       case "mutate":
+        if (
+          (BRANCH_ACTIONS as readonly string[]).includes(String(p.action || ""))
+        )
+          return mutateBranch(repo, String(p.action), p);
         return mutate(repo, String(p.action || ""), p);
       default:
         throw new Error("未知请求");
