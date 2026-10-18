@@ -26,6 +26,12 @@ class ErrorBoundary extends React.Component<
 }
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <ErrorBoundary>
-    {new URLSearchParams(location.search).get("diffWindow") ? <ReadonlyDiffWindow id={new URLSearchParams(location.search).get("diffWindow")!}/> : <App />}
+    {new URLSearchParams(location.search).get("diffWindow") ? (
+      <ReadonlyDiffWindow
+        id={new URLSearchParams(location.search).get("diffWindow")!}
+      />
+    ) : (
+      <App />
+    )}
   </ErrorBoundary>,
 );

@@ -1,341 +1,563 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import {
-  AlertTriangle,
-  ChevronDown,
-  Clock3,
-  GitCommitHorizontal,
-  Settings,
-} from "lucide-react";
+import { Clock3, GitCommitHorizontal, Settings } from "lucide-react";
 import type { RepoSnapshot } from "../../shared/types";
-import { Modal, Popover } from "./Dialogs";
-import { Presence } from "./Motion";
-import { Empty, IconButton, Spinner } from "./ui";
-
-const historyKey = (root: string) => `git-idea-commit-messages:${root}`;
-function readHistory(root: string): string[] {
-  try {
-    const values: unknown = JSON.parse(
-      localStorage.getItem(historyKey(root)) || "[]",
-    );
-    return Array.isArray(values)
-      ? values
-          .filter(
-            (value): value is string =>
-              typeof value === "string" && Boolean(value.trim()),
-          )
-          .slice(0, 30)
-      : [];
-  } catch {
-    return [];
-  }
+import type {
+  CommitScope,
+  WorkspaceState,
+} from "../../shared/commit-workspace";
+import { request } from "../api";
+import { Modal } from "./Dialogs";
+import { IconButton } from "./ui";
+interface Preview {
+  repo: string;
+  generation: number;
+  draftKey: string;
+  scopeName: string;
+  sourceLists: string[];
+  revision: number;
+  head: string;
+  index: string;
+  paths: string[];
+  partial: string[];
+  push: boolean;
+  message: string;
+  amend: boolean;
+  scope: CommitScope;
 }
-const commitMessage = (commit: NonNullable<RepoSnapshot["head"]>) =>
-  [commit.subject, commit.body].filter(Boolean).join("\n\n");
-
-export function CommitMessage({
-  snapshot: s,
-  stagedCount,
-  busy,
-  mutate,
-  confirm,
-  settings,
-}: {
+interface Props {
   snapshot: RepoSnapshot | null;
+  workspace: WorkspaceState | null;
   stagedCount: number;
   busy: boolean;
+  scope: CommitScope;
+  setScope: (scope: CommitScope) => void;
+  selected: string[];
   mutate: (
     action: string,
     params?: Record<string, unknown>,
   ) => Promise<boolean>;
-  confirm: (
-    title: string,
-    message: string,
-    action: () => Promise<unknown>,
-  ) => void;
+  prepare: () => Promise<boolean>;
+  refreshWorkspace: () => Promise<void>;
   settings: () => void;
-}) {
+  draftFlushRef?: { current: (() => Promise<void>) | null };
+}
+const fullMessage = (s: NonNullable<RepoSnapshot["head"]>) =>
+  [s.subject, s.body].filter(Boolean).join("\n\n");
+export function CommitMessage({
+  snapshot: s,
+  workspace,
+  stagedCount,
+  busy,
+  scope,
+  setScope,
+  selected,
+  mutate,
+  prepare,
+  refreshWorkspace,
+  settings,
+  draftFlushRef,
+}: Props) {
   const [message, setMessage] = useState(""),
-    [amend, setAmend] = useState(false);
-  const [error, setError] = useState(""),
-    [submitting, setSubmitting] = useState(false);
-  const [lastMenu, setLastMenu] = useState(false),
-    [historyOpen, setHistoryOpen] = useState(false);
-  const [savedMessages, setSavedMessages] = useState<string[]>([]);
-  const messageRef = useRef<HTMLTextAreaElement>(null),
-    lastAnchor = useRef<HTMLDivElement>(null);
-  const previousDraft = useRef(""),
+    [amend, setAmend] = useState(false),
+    [error, setError] = useState(""),
+    [submitting, setSubmitting] = useState(false),
+    [preparing, setPreparing] = useState(false),
+    [history, setHistory] = useState(false),
+    [preview, setPreview] = useState<Preview | null>(null);
+  const drafts = useRef<Record<string, string>>({}),
+    queue = useRef(Promise.resolve()),
+    timer = useRef<ReturnType<typeof setTimeout> | null>(null),
+    input = useRef<HTMLTextAreaElement>(null),
+    root = useRef(s?.root),
+    generation = useRef(0),
     submittingRef = useRef(false),
-    rootRef = useRef(s?.root);
-  rootRef.current = s?.root;
-  const locked = busy || submitting;
-  const conflicts = s?.changes.filter((c) => c.conflict).length || 0;
-  const history = useMemo(
-    () =>
-      Array.from(
-        new Set([
-          ...savedMessages,
-          ...(s?.head ? [commitMessage(s.head)] : []),
-          ...(s?.commits.map(commitMessage) || []),
-        ]),
-      )
-        .filter(Boolean)
-        .slice(0, 30),
-    [savedMessages, s?.head, s?.commits],
-  );
-  useEffect(() => {
-    rootRef.current = s?.root;
-    setMessage("");
-    setAmend(false);
-    setError("");
-    setLastMenu(false);
-    setHistoryOpen(false);
-    previousDraft.current = "";
-    setSavedMessages(s?.root ? readHistory(s.root) : []);
-    return () => {
-      rootRef.current = undefined;
-    };
-  }, [s?.root]);
-  useEffect(() => setError(""), [stagedCount, amend]);
-
-  function toggleAmend(value: boolean) {
-    if (value && s?.head) {
-      previousDraft.current = message;
-      setMessage(commitMessage(s.head));
-    } else setMessage(previousDraft.current);
-    setAmend(value);
-    setError("");
+    preparingRef = useRef(false),
+    pendingDraft = useRef<{ repo: string; key: string; text: string } | null>(
+      null,
+    );
+  if (root.current !== s?.root) {
+    root.current = s?.root;
+    generation.current++;
   }
-  function validate() {
-    if (!s || locked || submittingRef.current) return false;
-    const reason = !message.trim()
-      ? "请输入提交消息"
-      : conflicts
-        ? "请先解决所有文件冲突"
-        : !stagedCount && !amend
-          ? "请先勾选并暂存要提交的文件"
-          : "";
-    setError(reason);
-    if (reason) {
-      messageRef.current?.focus();
-      return false;
+  const key = amend
+    ? "amend"
+    : scope.kind === "changelist"
+      ? scope.id
+      : workspace?.activeListId || "default";
+  const locked = busy || submitting || preparing || !!workspace?.pending.length;
+  const draftId = (repo: string, draftKey: string) => `${repo}\0${draftKey}`;
+  function remember(repo: string, draftKey: string, text: string) {
+    drafts.current[draftId(repo, draftKey)] = text;
+    try {
+      localStorage.setItem(`git-idea-draft:${repo}:${draftKey}`, text);
+    } catch {
+      /* In-memory draft is retained. */
     }
-    return true;
   }
-  async function commit(push = false) {
-    if (!validate() || !s) return;
-    const root = s.root,
+  function persist(repo: string, draftKey: string, text: string) {
+    remember(repo, draftKey, text);
+    queue.current = queue.current
+      .catch(() => {})
+      .then(async () => {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const latest = await request<WorkspaceState>("commitWorkspace", repo);
+          if (latest.pending.length)
+            throw new Error("恢复待处理操作后可继续。草稿已保存在本机。");
+          try {
+            await request("mutate", repo, {
+              action: "commit.draft",
+              expectedRevision: latest.revision,
+              id: draftKey,
+              message: text,
+            });
+            if (root.current === repo) void refreshWorkspace();
+            return;
+          } catch (e) {
+            if (attempt) throw e;
+          }
+        }
+      });
+    void queue.current.catch((e) => {
+      if (root.current === repo) setError(e.message);
+    });
+  }
+  function flushDraft() {
+    if (timer.current) {
+      clearTimeout(timer.current);
+      timer.current = null;
+    }
+    if (pendingDraft.current) {
+      const pending = pendingDraft.current;
+      pendingDraft.current = null;
+      persist(pending.repo, pending.key, pending.text);
+    }
+    return queue.current;
+  }
+  if (draftFlushRef) draftFlushRef.current = flushDraft;
+  function edit(text: string) {
+    if (!s) return;
+    if (
+      pendingDraft.current &&
+      (pendingDraft.current.repo !== s.root || pendingDraft.current.key !== key)
+    )
+      void flushDraft();
+    setMessage(text);
+    setError("");
+    remember(s.root, key, text);
+    pendingDraft.current = { repo: s.root, key, text };
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => {
+      void flushDraft();
+    }, 450);
+  }
+  useEffect(() => {
+    void flushDraft();
+    setAmend(false);
+    setPreview(null);
+    setHistory(false);
+    setSubmitting(false);
+    setPreparing(false);
+    submittingRef.current = false;
+    preparingRef.current = false;
+    setError("");
+  }, [s?.root]);
+  useEffect(() => {
+    let stored: string | null = null;
+    try {
+      stored = s
+        ? localStorage.getItem(`git-idea-draft:${s.root}:${key}`)
+        : null;
+    } catch {}
+    setMessage(
+      (s ? drafts.current[draftId(s.root, key)] : undefined) ??
+        stored ??
+        workspace?.drafts[key] ??
+        "",
+    );
+  }, [s?.root, key, !!workspace]);
+  useEffect(
+    () => () => {
+      void flushDraft();
+    },
+    [],
+  );
+  async function submit(push = false) {
+    if (
+      !s ||
+      !workspace ||
+      locked ||
+      submittingRef.current ||
+      preparingRef.current
+    )
+      return;
+    if (s.operation) {
+      setError("当前 Git 操作尚未结束，请使用继续或中止入口。");
+      return;
+    }
+    if (!message.trim()) {
+      setError("请输入提交消息");
+      input.current?.focus();
+      return;
+    }
+    if (s.changes.some((c) => c.conflict)) {
+      setError("请先解决所有文件冲突");
+      return;
+    }
+    if (push && (!s.remotes.length || s.branch === "HEAD")) {
+      setError("请先配置远程仓库并切换到本地分支");
+      return;
+    }
+    const repo = s.root,
+      session = generation.current;
+    const commitScope =
+      scope.kind === "files"
+        ? { kind: "files" as const, paths: [...selected] }
+        : scope;
+    const draftKey = key,
       text = message.trim(),
-      target = s.upstream
-        ? {}
-        : { remote: s.remotes[0]?.name, branch: s.branch };
+      amendValue = amend;
+    preparingRef.current = true;
+    setPreparing(true);
+    try {
+      if (!(await prepare())) throw new Error("请先处理编辑器的自动保存提示");
+      if (root.current !== repo || session !== generation.current) return;
+      await flushDraft();
+      if (root.current !== repo || session !== generation.current) return;
+      const value = await request<
+        Pick<Preview, "revision" | "head" | "index" | "paths" | "partial">
+      >("commitScopePreview", repo, { scope: commitScope, amend: amendValue });
+      if (root.current !== repo || session !== generation.current) return;
+      if (
+        !value.paths.length &&
+        !(amendValue && commitScope.kind === "all-staged")
+      )
+        throw new Error("当前范围没有已暂存内容，请先勾选文件");
+      setPreview({
+        ...value,
+        repo,
+        generation: session,
+        draftKey,
+        scopeName:
+          commitScope.kind === "all-staged"
+            ? "全部已暂存内容"
+            : commitScope.kind === "files"
+              ? "所选文件"
+              : workspace.lists.find((list) => list.id === commitScope.id)
+                  ?.name || "更改列表",
+        sourceLists: [
+          ...new Set(
+            value.paths.map((path) => {
+              const change = s.changes.find(
+                (item) => item.path === path || item.oldPath === path,
+              );
+              const listId =
+                workspace.assignments[change?.path || path] ||
+                workspace.activeListId;
+              return (
+                workspace.lists.find((list) => list.id === listId)?.name ||
+                "更改"
+              );
+            }),
+          ),
+        ],
+        push,
+        message: text,
+        amend: amendValue,
+        scope: commitScope,
+      });
+    } catch (e) {
+      if (root.current === repo && session === generation.current)
+        setError((e as Error).message);
+    } finally {
+      if (root.current === repo && session === generation.current) {
+        preparingRef.current = false;
+        setPreparing(false);
+      }
+    }
+  }
+  async function commit(value: Preview) {
+    if (
+      !s ||
+      busy ||
+      submittingRef.current ||
+      value.repo !== s.root ||
+      value.generation !== generation.current
+    )
+      return;
     submittingRef.current = true;
     setSubmitting(true);
+    const repo = value.repo,
+      session = value.generation,
+      draftKey = value.draftKey;
     try {
-      if (!(await mutate("commit", { message: text, amend }))) return;
-      const saved = Array.from(new Set([text, ...readHistory(root)]))
-        .filter((value) => value.length <= 20000)
-        .slice(0, 30);
+      if (
+        !(await mutate("commit.scope", {
+          scope: value.scope,
+          message: value.message,
+          amend: value.amend,
+          expectedRevision: value.revision,
+          expectedHead: value.head,
+          expectedIndex: value.index,
+        }))
+      )
+        return;
+      if (root.current !== repo || session !== generation.current) return;
       try {
-        localStorage.setItem(historyKey(root), JSON.stringify(saved));
+        const storage = `git-idea-commit-messages:${repo}`,
+          old = JSON.parse(localStorage.getItem(storage) || "[]");
+        localStorage.setItem(
+          storage,
+          JSON.stringify(
+            [
+              ...new Set([value.message, ...(Array.isArray(old) ? old : [])]),
+            ].slice(0, 30),
+          ),
+        );
       } catch {
-        /* Committing does not depend on history storage. */
+        /* History does not affect a completed commit. */
       }
-      if (rootRef.current !== root) return;
-      setSavedMessages(saved);
       setMessage("");
+      remember(repo, draftKey, "");
       setAmend(false);
-      previousDraft.current = "";
-      if (push) await mutate("push", target);
-    } finally {
-      submittingRef.current = false;
-      setSubmitting(false);
-    }
-  }
-  function submit(push = false) {
-    if (!validate() || !s) return;
-    if (push) {
-      if (!s.remotes.length || s.branch === "HEAD") {
-        setError("请先配置远程仓库并切换到本地分支");
+      const after = await request<WorkspaceState>("commitWorkspace", repo);
+      if (root.current !== repo || session !== generation.current) return;
+      if (after.pending.length) {
+        setError("提交已创建，请先完成恢复记录中的索引恢复。暂不推送。");
         return;
       }
-      const root = s.root;
-      confirm(
-        "提交并推送",
-        `提交 ${stagedCount} 个已暂存文件${amend ? "并修订上次提交" : ""}，然后推送到 ${s.upstream || `${s.remotes[0].name}/${s.branch}`}。`,
-        async () => {
-          if (rootRef.current === root) await commit(true);
-        },
-      );
-    } else void commit();
+      persist(repo, draftKey, "");
+      if (value.push)
+        await mutate(
+          "push",
+          s.upstream ? {} : { remote: s.remotes[0]?.name, branch: s.branch },
+        );
+    } catch (cause) {
+      if (root.current === repo && session === generation.current)
+        setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      if (root.current === repo && session === generation.current) {
+        submittingRef.current = false;
+        setSubmitting(false);
+        setPreview(null);
+        void refreshWorkspace();
+      }
+    }
   }
-  const cannotCommit =
-    locked || !s || Boolean(conflicts) || (!stagedCount && !amend);
+  const messages = Array.from(
+    new Set([
+      ...(s?.head ? [fullMessage(s.head)] : []),
+      ...(s?.commits.map(fullMessage) || []),
+    ]),
+  );
+  if (s)
+    try {
+      const saved = JSON.parse(
+        localStorage.getItem(`git-idea-commit-messages:${s.root}`) || "[]",
+      );
+      if (Array.isArray(saved))
+        for (const text of saved.reverse())
+          if (typeof text === "string" && !messages.includes(text))
+            messages.unshift(text);
+    } catch {}
+  const scopedStaged =
+    s?.changes.filter(
+      (change) =>
+        change.index !== "?" &&
+        change.index !== " " &&
+        !change.conflict &&
+        (scope.kind === "all-staged" ||
+          (scope.kind === "files"
+            ? selected.includes(change.path)
+            : (workspace?.assignments[change.path] ||
+                workspace?.activeListId) === scope.id)),
+    ).length || 0;
+  const canCommit = scopedStaged > 0 || (amend && scope.kind === "all-staged");
   return (
     <div className="commit-form">
+      <select
+        aria-label="提交范围"
+        value={scope.kind === "changelist" ? scope.id : scope.kind}
+        disabled={locked || !!s?.operation || !workspace}
+        onChange={(e) => {
+          void flushDraft();
+          setScope(
+            e.target.value === "all-staged"
+              ? { kind: "all-staged" }
+              : e.target.value === "files"
+                ? { kind: "files", paths: selected }
+                : { kind: "changelist", id: e.target.value },
+          );
+        }}
+      >
+        <option value="all-staged">全部已暂存内容</option>
+        <option value="files">所选文件的已暂存内容（{selected.length}）</option>
+        {workspace?.lists.map((list) => (
+          <option key={list.id} value={list.id}>
+            列表：{list.name}
+          </option>
+        ))}
+      </select>
       <div className="commit-options">
         <label className="checkbox-label">
           <input
             type="checkbox"
             checked={amend}
-            disabled={!s?.head || locked || Boolean(s?.operation)}
-            onChange={(e) => toggleAmend(e.target.checked)}
+            disabled={locked || !s?.head || !!s.operation}
+            onChange={(e) => {
+              void flushDraft();
+              if (
+                e.target.checked &&
+                s?.head &&
+                !drafts.current[draftId(s.root, "amend")] &&
+                !workspace?.drafts.amend
+              )
+                remember(s.root, "amend", fullMessage(s.head));
+              setAmend(e.target.checked);
+            }}
           />
           修订
         </label>
-        <div className="popover-anchor" ref={lastAnchor}>
-          <button
-            className="last-commit-button"
-            disabled={!s?.head || locked}
-            aria-haspopup="menu"
-            aria-expanded={lastMenu}
-            title={
-              s?.head
-                ? `${s.head.hash.slice(0, 8)} ${s.head.subject}`
-                : "暂无提交"
-            }
-            onClick={() => setLastMenu(!lastMenu)}
-          >
-            上次提交
-            <ChevronDown size={12} />
-          </button>
-          <Popover
-            open={lastMenu}
-            onClose={() => setLastMenu(false)}
-            label="上次提交操作"
-            anchor={lastAnchor}
-            above
-            className="last-commit-menu"
-          >
-            <div className="menu-caption">
-              {s?.head?.hash.slice(0, 8)} · {s?.head?.subject}
-            </div>
-            <button
-              role="menuitem"
-              disabled={locked}
-              onClick={() => {
-                if (s?.head) setMessage(commitMessage(s.head));
-                setLastMenu(false);
-                setError("");
-              }}
-            >
-              使用上次提交消息
-            </button>
-            <button
-              role="menuitem"
-              disabled={!s?.head || locked || amend || Boolean(s?.operation)}
-              onClick={() => {
-                toggleAmend(true);
-                setLastMenu(false);
-              }}
-            >
-              修订上次提交
-            </button>
-          </Popover>
-        </div>
+        <button
+          disabled={locked || !s?.head}
+          onClick={() => s?.head && edit(fullMessage(s.head))}
+        >
+          上次提交
+        </button>
         <IconButton
           title="提交消息历史"
-          disabled={!s || locked}
-          onClick={() => setHistoryOpen(true)}
+          disabled={locked}
+          onClick={() => setHistory(true)}
         >
           <Clock3 size={15} />
         </IconButton>
-        <span
-          className="commit-selected-count"
-          title="仅提交 Git 暂存区中的内容"
-        >
-          {stagedCount} 个待提交
+        <span className="commit-selected-count">
+          当前范围 {scopedStaged} / 全部 {stagedCount} 个已暂存
         </span>
       </div>
       <textarea
-        ref={messageRef}
+        ref={input}
         aria-label="提交信息"
-        aria-describedby={error ? "commit-message-error" : undefined}
-        aria-invalid={Boolean(error)}
+        aria-invalid={!!error}
         value={message}
-        onChange={(e) => {
-          setMessage(e.target.value);
-          setError("");
-        }}
+        maxLength={20000}
+        onChange={(e) => edit(e.target.value)}
+        onBlur={() => void flushDraft()}
         placeholder="提交消息"
+        disabled={locked || !s}
         onKeyDown={(e) => {
           if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
             e.preventDefault();
-            submit();
+            void submit();
           }
         }}
-        disabled={locked || !s}
       />
       {error && (
-        <div id="commit-message-error" className="form-error" role="alert">
+        <div className="form-error" role="alert">
           {error}
         </div>
       )}
       {s && (!s.identity.name || !s.identity.email) && (
-        <button
-          className="identity-warning"
-          disabled={locked}
-          onClick={settings}
-        >
-          <AlertTriangle size={12} />
+        <button className="identity-warning" onClick={settings}>
           设置提交者姓名和邮箱
         </button>
       )}
       <div className="commit-actions">
         <button
           className="primary"
-          disabled={cannotCommit}
-          onClick={() => submit()}
+          disabled={locked || !s || !workspace || !canCommit || !!s.operation}
+          onClick={() => void submit()}
         >
-          {locked ? <Spinner /> : <GitCommitHorizontal size={14} />}提交
+          <GitCommitHorizontal size={14} />
+          {submitting ? "正在提交…" : preparing ? "正在准备…" : "提交"}
           <span className="key-hint">Ctrl ↵</span>
         </button>
         <button
-          disabled={cannotCommit || !s?.remotes.length || s.branch === "HEAD"}
-          onClick={() => submit(true)}
+          disabled={
+            locked ||
+            !s?.remotes.length ||
+            !canCommit ||
+            !!s?.operation ||
+            !workspace
+          }
+          onClick={() => void submit(true)}
         >
           提交并推送…
         </button>
-        <IconButton title="提交设置" disabled={locked} onClick={settings}>
+        <IconButton title="提交设置" onClick={settings}>
           <Settings size={15} />
         </IconButton>
       </div>
       {createPortal(
-        <Presence>
-          {historyOpen && (
-            <Modal title="提交消息历史" onClose={() => setHistoryOpen(false)}>
+        <>
+          {preview && (
+            <Modal
+              title={preview.push ? "确认提交并推送" : "确认提交范围"}
+              onClose={() => !submitting && setPreview(null)}
+            >
               <p className="modal-description">
-                选择消息填入编辑区。包含本仓库最近使用的消息和当前日志中的提交。
+                提交以下 {preview.paths.length} 个文件的已暂存版本
+                {preview.amend ? "，并修订上次提交" : ""}
+                。未暂存内容保留在工作树。
               </p>
-              <div className="commit-message-history">
-                {history.map((text, i) => (
-                  <button
-                    key={text}
-                    disabled={locked}
-                    title={text}
-                    onClick={() => {
-                      setMessage(text);
-                      setError("");
-                      setHistoryOpen(false);
-                    }}
-                  >
-                    <Clock3 size={14} />
-                    <span>
-                      <strong>{text.split("\n")[0]}</strong>
-                      {text.includes("\n") && (
-                        <small>
-                          {text.slice(text.indexOf("\n") + 1).trim()}
-                        </small>
-                      )}
-                    </span>
-                    <span className="tiny muted">{i + 1}</span>
-                  </button>
+              <p>
+                提交范围：{preview.scopeName}；来源列表：
+                {preview.sourceLists.join("、") || "无文件（仅修订消息）"}
+              </p>
+              {preview.partial.length > 0 && (
+                <p className="form-error">
+                  {preview.partial.length}{" "}
+                  个文件存在未暂存改动，本次仅提交暂存版本。
+                </p>
+              )}
+              <div style={{ maxHeight: "32vh", overflow: "auto" }}>
+                {preview.paths.map((path) => (
+                  <div className="mono" key={path}>
+                    {path}
+                  </div>
                 ))}
-                {!history.length && <Empty title="暂无提交消息" />}
+              </div>
+              <pre style={{ whiteSpace: "pre-wrap" }}>{preview.message}</pre>
+              {preview.push && (
+                <p>
+                  随后推送到{" "}
+                  {s?.upstream || `${s?.remotes[0]?.name}/${s?.branch}`}
+                </p>
+              )}
+              <div className="modal-actions">
+                <button disabled={submitting} onClick={() => setPreview(null)}>
+                  取消
+                </button>
+                <button
+                  className="primary"
+                  disabled={submitting}
+                  onClick={() => void commit(preview)}
+                >
+                  确认提交
+                </button>
               </div>
             </Modal>
           )}
-        </Presence>,
+          {history && (
+            <Modal title="提交消息历史" onClose={() => setHistory(false)}>
+              <div className="commit-message-history">
+                {messages.slice(0, 30).map((text) => (
+                  <button
+                    key={text}
+                    onClick={() => {
+                      edit(text);
+                      setHistory(false);
+                    }}
+                  >
+                    <Clock3 size={14} />
+                    <span>{text}</span>
+                  </button>
+                ))}
+                {!messages.length && <p className="muted">暂无提交消息</p>}
+              </div>
+            </Modal>
+          )}
+        </>,
         document.body,
       )}
     </div>

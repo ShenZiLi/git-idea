@@ -1167,6 +1167,9 @@ export default function App() {
               {...{ busy, mutate, openDiff, confirm, settings, stash }}
               activePath={tab?.path}
               refresh={() => void refresh()}
+              prepare={async () =>
+                !editorFlush.current || (await editorFlush.current())
+              }
             />
           </div>
           {logVisible && (
@@ -1295,6 +1298,7 @@ export default function App() {
                     <ConsolePanel logs={logs} />
                   ) : (
                     <StashPanel
+                      repo={repo}
                       stashes={snapshot?.stashes || []}
                       {...{ busy, mutate, confirm }}
                     />

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Archive,
   ArrowDownToLine,
@@ -23,7 +23,9 @@ import type {
   Stash,
 } from "../../shared/types";
 import { request } from "../api";
-import { Popover } from "./Dialogs";
+import { Modal, Popover } from "./Dialogs";
+import { ReadonlyDiff } from "./BranchCompare";
+import type { DiffData } from "../../shared/types";
 import {
   BranchLabel,
   dateTime,
@@ -274,11 +276,13 @@ export function ConsolePanel({ logs }: { logs: CommandLog[] }) {
   );
 }
 export function StashPanel({
+  repo,
   stashes,
   busy,
   mutate,
   confirm,
 }: {
+  repo: string;
   stashes: Stash[];
   busy: boolean;
   mutate: (action: string, p?: Record<string, unknown>) => Promise<boolean>;
@@ -288,6 +292,49 @@ export function StashPanel({
     action: () => Promise<unknown>,
   ) => void;
 }) {
+  const [preview, setPreview] = useState<Stash | null>(null),
+    [files, setFiles] = useState<
+      { path: string; untracked: boolean; staged: boolean; working: boolean }[]
+    >([]),
+    [data, setData] = useState<DiffData | null>(null),
+    [error, setError] = useState("");
+  const session = useRef(repo),
+    lookup = useRef(0);
+  session.current = repo;
+  useEffect(() => {
+    setPreview(null);
+    return () => {
+      session.current = "";
+      lookup.current++;
+    };
+  }, [repo]);
+  useEffect(() => {
+    let current = true;
+    lookup.current++;
+    setFiles([]);
+    setData(null);
+    setError("");
+    if (preview)
+      void request<
+        {
+          path: string;
+          untracked: boolean;
+          staged: boolean;
+          working: boolean;
+        }[]
+      >("stashFiles", repo, {
+        hash: preview.hash,
+      })
+        .then((v) => {
+          if (current) setFiles(v);
+        })
+        .catch((e) => {
+          if (current) setError(e.message);
+        });
+    return () => {
+      current = false;
+    };
+  }, [repo, preview]);
   return (
     <section className="stash-panel">
       <div className="panel-toolbar">
@@ -307,16 +354,37 @@ export function StashPanel({
                 {stash.ref} · {dateTime(stash.date)}
               </span>
             </div>
+            <button disabled={!stash.hash} onClick={() => setPreview(stash)}>
+              预览
+            </button>
             <button
               disabled={busy}
-              onClick={() => void mutate("stash.apply", { ref: stash.ref })}
+              onClick={() =>
+                confirm(
+                  "应用储藏",
+                  `将 ${stash.message} 应用到工作树，保留储藏记录？`,
+                  () =>
+                    session.current === repo
+                      ? mutate("stash.apply", { hash: stash.hash })
+                      : Promise.resolve(false),
+                )
+              }
             >
               <ArrowDownToLine size={13} />
               应用
             </button>
             <button
               disabled={busy}
-              onClick={() => void mutate("stash.pop", { ref: stash.ref })}
+              onClick={() =>
+                confirm(
+                  "弹出储藏",
+                  `将 ${stash.message} 应用到工作树，成功后删除该储藏？`,
+                  () =>
+                    session.current === repo
+                      ? mutate("stash.pop", { hash: stash.hash })
+                      : Promise.resolve(false),
+                )
+              }
             >
               <ArrowUpFromLine size={13} />
               弹出
@@ -328,7 +396,10 @@ export function StashPanel({
                 confirm(
                   "删除储藏",
                   `永久删除 ${stash.ref}：${stash.message}？`,
-                  () => mutate("stash.drop", { ref: stash.ref }),
+                  () =>
+                    session.current === repo
+                      ? mutate("stash.drop", { hash: stash.hash })
+                      : Promise.resolve(false),
                 )
               }
             >
@@ -342,6 +413,54 @@ export function StashPanel({
           </Empty>
         )}
       </div>
+      {preview && (
+        <Modal
+          title={`储藏预览 · ${preview.message}`}
+          onClose={() => {
+            lookup.current++;
+            setPreview(null);
+          }}
+          wide
+        >
+          <div style={{ maxHeight: "65vh", overflow: "auto" }}>
+            {error && <p className="form-error">{error}</p>}
+            <div className="panel-toolbar" style={{ flexWrap: "wrap" }}>
+              {files.flatMap((file) =>
+                (file.staged
+                  ? [true, ...(file.working ? [false] : [])]
+                  : [false]
+                ).map((staged) => (
+                  <button
+                    key={file.path + staged}
+                    onClick={() => {
+                      setError("");
+                      const id = ++lookup.current;
+                      void request<DiffData>("stashDiff", repo, {
+                        hash: preview.hash,
+                        path: file.path,
+                        staged,
+                      })
+                        .then((value) => {
+                          if (id === lookup.current && session.current === repo)
+                            setData(value);
+                        })
+                        .catch((e) => {
+                          if (id === lookup.current && session.current === repo)
+                            setError(e.message);
+                        });
+                    }}
+                  >
+                    {file.path}
+                    {file.untracked ? " · 未托管" : ""}
+                    {staged ? " · 暂存" : file.staged ? " · 工作区" : ""}
+                  </button>
+                )),
+              )}
+            </div>
+            {data && <ReadonlyDiff data={data} />}
+          </div>
+        </Modal>
+      )}
     </section>
   );
 }
